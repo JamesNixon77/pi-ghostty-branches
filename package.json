@@ -23,13 +23,27 @@
     "README.md",
     "LICENSE"
   ],
+  "engines": {
+    "node": ">=22"
+  },
   "peerDependencies": {
-    "@earendil-works/pi-agent-core": "*",
-    "@earendil-works/pi-ai": "*",
-    "@earendil-works/pi-coding-agent": "*",
-    "@earendil-works/pi-tui": "*"
+    "@earendil-works/pi-ai": ">=0.84.0",
+    "@earendil-works/pi-coding-agent": ">=0.84.0",
+    "@earendil-works/pi-tui": ">=0.84.0"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-ai": {
+      "optional": true
+    },
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "@earendil-works/pi-tui": {
+      "optional": true
+    }
   },
   "scripts": {
-    "check": "node --check extensions/ghostty-branches/sidebar.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "check": "node --check extensions/ghostty-branches/sidebar.mjs && node --test tests/*.test.mjs"
   }
 }
