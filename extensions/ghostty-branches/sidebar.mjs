@@ -316,7 +316,9 @@ function render() {
 		lines.push(pad(truncate(`${color.dim}Type a name · Enter save · Esc cancel${color.reset}`, width), width));
 	} else {
 		const globalActions = [];
-		addButton(globalActions, row, "n New Root", "new-root", Boolean(findCoordinator(nodes)));
+		const coordinatorAvailable = Boolean(findCoordinator(nodes));
+		addButton(globalActions, row, "n New Root", "new-root", coordinatorAvailable);
+		addButton(globalActions, row, "d Cleanup", "cleanup", coordinatorAvailable);
 		lines.push(pad(truncate(globalActions.join(""), width), width));
 
 		row = lines.length + 1;
@@ -455,6 +457,7 @@ function request(action, targetSessionId = selectedId, extra = {}) {
 	else if (action === "rename") statusMessage = `Renamed branch to “${extra.name}”`;
 	else if (action === "resume") statusMessage = "Resume request sent";
 	else if (action === "new-root") statusMessage = "New root session requested";
+	else if (action === "cleanup") statusMessage = "Runtime cleanup requested";
 	else if (action === "minimize") statusMessage = `Hiding “${node.label}”`;
 	else statusMessage = `Closing “${node.label}”`;
 	scheduleRender();
@@ -500,6 +503,22 @@ function beginNewRoot() {
 		action: "new-root",
 		nodeId: coordinator.sessionId,
 		text: "Create an independent writable root session? It inherits no conversation and shares this working directory.",
+	};
+	renameEditor = undefined;
+	scheduleRender();
+}
+
+function beginCleanup() {
+	const coordinator = findCoordinator(readNodes());
+	if (!coordinator) {
+		statusMessage = "No live Pi pane is available to run cleanup";
+		scheduleRender();
+		return;
+	}
+	confirmation = {
+		action: "cleanup",
+		nodeId: coordinator.sessionId,
+		text: "Remove stale coordination metadata and generated launchers? Saved Pi sessions will be kept.",
 	};
 	renameEditor = undefined;
 	scheduleRender();
@@ -627,6 +646,9 @@ function runAction(action) {
 			return;
 		case "new-root":
 			beginNewRoot();
+			return;
+		case "cleanup":
+			beginCleanup();
 			return;
 		case "rename":
 			beginRename(node);
@@ -773,6 +795,7 @@ function handleInput(data) {
 	if (keyboard.includes("\x1b[C")) return setCollapsed(false);
 	if (keyboard.includes("\r") || keyboard.includes("\n")) return runAction("focus");
 	if (keyboard.includes("n")) return runAction("new-root");
+	if (keyboard.includes("d")) return runAction("cleanup");
 	if (keyboard.includes("b")) return runAction("branch");
 	if (keyboard.includes("f")) return runAction("fold");
 	if (keyboard.includes("r")) return runAction("rename");

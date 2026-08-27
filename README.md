@@ -66,6 +66,7 @@ The ordinary workflow is:
 | Command or shortcut | Effect |
 | --- | --- |
 | `/branches` | Open or focus the branch sidebar |
+| `/branches cleanup` | Confirm removal of stale runtime coordination data without deleting Pi sessions |
 | `/branch [goal]` | Create a read-only child; a supplied goal starts immediately |
 | `/branch-write [goal]` | Create a writable child in the same working directory |
 | `/fold [instructions]` | Fold this child branch's new findings into its immediate parent |
@@ -82,6 +83,7 @@ Every clickable action shows its keyboard equivalent.
 | Control | Effect |
 | --- | --- |
 | `n New Root` | Create an independent writable top-level session with no inherited conversation |
+| `d Cleanup` | Confirm cleanup of stale metadata, generated launchers, and abandoned temporary claims |
 | `b Branch` | Confirm creation of a read-only child from the selected session |
 | `f Fold` | Confirm folding a child into its parent; success closes the child pane |
 | `r Rename` | Rename the Pi session, sidebar row, and pane title |
@@ -158,6 +160,14 @@ or, by default:
 ```
 
 It contains branch graph records, request/fold inboxes, sidebar selection, and generated launchers. Session conversations remain in Pi's normal session directory. Runtime data and credentials are not committed to this repository.
+
+Run cleanup from Pi or the sidebar:
+
+```text
+/branches cleanup
+```
+
+or click `d Cleanup`. Cleanup removes only reconstructable or orphaned coordination data: metadata whose process, Ghostty terminal, and saved session are all gone; stale sidebar/selection records; orphaned generated launchers; and abandoned temporary/processing files older than one hour. It never deletes Pi session JSONL files. Closed or hidden branches with an existing session file remain available for Resume/Restore.
 
 ## Troubleshooting
 

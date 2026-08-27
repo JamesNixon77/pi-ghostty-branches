@@ -10,6 +10,7 @@ import {
 	type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
+import { cleanupState, type CleanupResult } from "./cleanup.ts";
 import {
 	atomicWriteText,
 	claimPath,
@@ -670,6 +671,36 @@ export default function (pi: ExtensionAPI) {
 		}
 	};
 
+	const formatCleanupResult = (result: CleanupResult): string => {
+		const parts = [
+			["node", result.nodes],
+			["sidebar", result.sidebars],
+			["selection", result.selections],
+			["launcher", result.launchers],
+			["request", result.requests],
+			["fold claim", result.folds],
+			["temporary file", result.temporaryFiles],
+		]
+			.filter(([, count]) => Number(count) > 0)
+			.map(([label, count]) => `${count} ${label}${Number(count) === 1 ? "" : "s"}`);
+		return parts.length > 0 ? parts.join(", ") : "nothing stale";
+	};
+
+	const cleanupRuntimeState = async (ctx: ExtensionContext, confirm: boolean): Promise<void> => {
+		if (confirm) {
+			const accepted = await ctx.ui.confirm(
+				"Clean branch runtime state?",
+				"Remove stale coordination metadata and generated launchers? Saved Pi session files will not be deleted.",
+			);
+			if (!accepted) return;
+		}
+		const result = await cleanupState({
+			stateDir: STATE_DIR,
+			terminalExists: (terminalId) => terminalExists(terminalId),
+		});
+		ctx.ui.notify(`Branch cleanup complete: ${formatCleanupResult(result)}`, "info");
+	};
+
 	const scanRequests = async (): Promise<void> => {
 		const ctx = activeContext;
 		if (!ctx || requestScanRunning) return;
@@ -714,6 +745,8 @@ export default function (pi: ExtensionAPI) {
 						await resumeBranch(ctx, request.branchSessionId);
 					} else if (request.action === "new-root") {
 						await createRootSession(ctx, request.groupRootSessionId);
+					} else if (request.action === "cleanup") {
+						await cleanupRuntimeState(ctx, false);
 					} else if (request.action === "minimize") {
 						hideCurrentPane(ctx);
 					} else {
@@ -868,8 +901,15 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("branches", {
-		description: "Open or focus the clickable Ghostty branch sidebar",
-		handler: async (_args, ctx) => openSidebar(ctx),
+		description: "Open/focus the branch sidebar, or clean stale state with /branches cleanup",
+		getArgumentCompletions: (prefix) => {
+			const item = { value: "cleanup", label: "cleanup — remove stale runtime metadata" };
+			return item.value.startsWith(prefix) ? [item] : null;
+		},
+		handler: async (args, ctx) => {
+			if (args.trim() === "cleanup") await cleanupRuntimeState(ctx, true);
+			else await openSidebar(ctx);
+		},
 	});
 
 	pi.registerCommand("branch-sidebar", {

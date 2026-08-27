@@ -42,7 +42,7 @@ export interface BranchNode {
 export interface BranchRequest {
 	version: 1;
 	id: string;
-	action: "branch" | "fold" | "rename" | "close" | "minimize" | "resume" | "new-root";
+	action: "branch" | "fold" | "rename" | "close" | "minimize" | "resume" | "new-root" | "cleanup";
 	targetSessionId: string;
 	branchSessionId?: string;
 	groupRootSessionId?: string;
