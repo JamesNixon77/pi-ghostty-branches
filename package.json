@@ -1,0 +1,35 @@
+{
+  "name": "pi-ghostty-branches",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Ghostty-native parallel session branches, navigation, and context folding for Pi.",
+  "author": "James Nixon",
+  "license": "MIT",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-extension",
+    "ghostty",
+    "session-branching",
+    "terminal"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions/ghostty-branches/index.ts"
+    ]
+  },
+  "files": [
+    "extensions/ghostty-branches",
+    "README.md",
+    "LICENSE"
+  ],
+  "peerDependencies": {
+    "@earendil-works/pi-agent-core": "*",
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  },
+  "scripts": {
+    "check": "node --check extensions/ghostty-branches/sidebar.mjs"
+  }
+}
