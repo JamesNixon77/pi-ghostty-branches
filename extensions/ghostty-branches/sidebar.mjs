@@ -197,6 +197,10 @@ function stripAnsi(value) {
 	return value.replace(/\x1b\[[0-9;]*m/g, "");
 }
 
+function visibleWidth(value) {
+	return stripAnsi(value).length;
+}
+
 function truncate(value, width) {
 	if (width <= 0) return "";
 	const plain = stripAnsi(value);
@@ -241,18 +245,144 @@ function nodeLine(item, selected, width) {
 	return selected ? `${color.reverse}${fitted}${color.reset}` : fitted;
 }
 
-function addButton(parts, row, label, action, enabled = true) {
-	if (parts.length > 0) parts.push(" ");
-	const start = stripAnsi(parts.join("")).length + 1;
-	const text = `[${label}]`;
-	parts.push(enabled ? `${color.blue}${text}${color.reset}` : `${color.dim}${text}${color.reset}`);
-	const end = start + text.length - 1;
-	if (enabled) buttonTargets.push({ row, start, end, action });
+function renderButtonGroup(buttons, width) {
+	const lines = [];
+	const targets = [];
+	let parts = [];
+	let currentWidth = 0;
+	let rowOffset = 0;
+
+	const flush = () => {
+		if (parts.length === 0) return;
+		lines.push(pad(parts.join(""), width));
+		parts = [];
+		currentWidth = 0;
+		rowOffset++;
+	};
+
+	for (const button of buttons) {
+		const text = `[${button.label}]`;
+		const buttonWidth = visibleWidth(text);
+		const separatorWidth = currentWidth > 0 ? 1 : 0;
+		if (currentWidth > 0 && currentWidth + separatorWidth + buttonWidth > width) flush();
+		if (currentWidth > 0) {
+			parts.push(" ");
+			currentWidth++;
+		}
+		const start = currentWidth + 1;
+		parts.push(button.enabled ? `${color.blue}${text}${color.reset}` : `${color.dim}${text}${color.reset}`);
+		currentWidth += buttonWidth;
+		if (button.enabled) targets.push({ rowOffset, start, end: start + buttonWidth - 1, action: button.action });
+	}
+	flush();
+	return { lines, targets };
+}
+
+function buildFooter(nodes, selected, width) {
+	const lines = ["─".repeat(width)];
+	const targets = [];
+	const addLine = (line = "") => lines.push(pad(truncate(line, width), width));
+	const addButtons = (buttons) => {
+		const group = renderButtonGroup(buttons, width);
+		const offset = lines.length;
+		lines.push(...group.lines);
+		targets.push(...group.targets.map((target) => ({ ...target, rowOffset: target.rowOffset + offset })));
+	};
+
+	if (confirmation) {
+		addLine(`${color.bold}${color.yellow}Confirm action${color.reset}`);
+		for (const line of wrapText(confirmation.text, width, 2)) addLine(line);
+		while (lines.length < 4) addLine();
+		addButtons([
+			{ label: "↵ Confirm", action: "confirm", enabled: true },
+			{ label: "Esc Cancel", action: "cancel", enabled: true },
+		]);
+		addLine();
+		addLine(`${color.dim}Enter/y confirm · Esc/n cancel${color.reset}`);
+		return { lines, targets };
+	}
+
+	if (renameEditor) {
+		addLine(`${color.bold}${color.blue}Rename branch${color.reset}`);
+		const shownName = renameEditor.value || `${color.dim}${renameEditor.original}${color.reset}`;
+		const cursor = stripAnsi(shownName).length < width - 3 ? "▌" : "";
+		addLine(`> ${shownName}${cursor}`);
+		addButtons([
+			{ label: "↵ Save", action: "save-rename", enabled: Boolean(renameEditor.value.trim()) },
+			{ label: "Esc Cancel", action: "cancel", enabled: true },
+		]);
+		addLine();
+		addLine(`${color.dim}Type a name · Enter save · Esc cancel${color.reset}`);
+		return { lines, targets };
+	}
+
+	const coordinatorAvailable = Boolean(findCoordinator(nodes));
+	addButtons([
+		{ label: "n New Root", action: "new-root", enabled: coordinatorAvailable },
+		{ label: "d Cleanup", action: "cleanup", enabled: coordinatorAvailable },
+	]);
+
+	const isMinimized = selected?.displayStatus === "minimized";
+	const isClosed = selected?.displayStatus === "closed";
+	const isInactive = isClosed || isMinimized;
+	const liveTerminal = Boolean(selected?.terminalId && !isInactive);
+	if (isInactive) {
+		addButtons([
+			{ label: isMinimized ? "o Restore" : "o Resume", action: "resume", enabled: Boolean(selected?.sessionFile) },
+			{ label: "x Remove", action: "remove", enabled: selected?.sessionId !== rootSessionId },
+			{ label: "r Rename", action: "rename", enabled: Boolean(selected) },
+		]);
+		addLine(`${color.dim}${isMinimized ? "Hidden · select or press o to restore" : "Closed · saved session retained"}${color.reset}`);
+	} else {
+		addButtons([
+			{ label: "b Branch", action: "branch", enabled: Boolean(selected) },
+			{ label: "f Fold", action: "fold", enabled: Boolean(selected?.parentSessionId) },
+			{ label: "r Rename", action: "rename", enabled: Boolean(selected) },
+		]);
+		addButtons([
+			{ label: "↵ Focus", action: "focus", enabled: liveTerminal },
+			{
+				label: "h Hide",
+				action: "minimize",
+				enabled: Boolean((selected?.parentSessionId || selected?.sessionId !== rootSessionId) && liveTerminal),
+			},
+			{ label: "c Close", action: "close", enabled: liveTerminal },
+		]);
+	}
+
+	if (showLayoutControls) {
+		if (isInactive) {
+			addLine();
+			addLine();
+		} else {
+			addButtons([
+				{ label: "H Left", action: "resize-left", enabled: liveTerminal },
+				{ label: "L Right", action: "resize-right", enabled: liveTerminal },
+				{ label: "= Equal", action: "equalize", enabled: liveTerminal },
+			]);
+			addButtons([
+				{ label: "K Up", action: "resize-up", enabled: liveTerminal },
+				{ label: "J Down", action: "resize-down", enabled: liveTerminal },
+				{ label: "z Zoom", action: "zoom", enabled: liveTerminal },
+			]);
+		}
+	}
+
+	const root = nodes.find((node) => node.sessionId === rootSessionId);
+	addButtons([
+		{ label: "- Side", action: "sidebar-smaller", enabled: Boolean(root?.terminalId) },
+		{ label: "+ Side", action: "sidebar-larger", enabled: Boolean(getSidebarTerminalId()) },
+		{ label: showLayoutControls ? "l Done" : "l Layout", action: "toggle-layout", enabled: true },
+	]);
+	addLine(`${color.dim}${statusMessage}${color.reset}`);
+	addLine(`${color.dim}click or shown keys · ↑↓ select · q sidebar${color.reset}`);
+	return { lines, targets };
 }
 
 function render() {
 	if (stopped) return;
-	const terminalWidth = Math.max(20, process.stdout.columns || 32);
+	const testWidth = Number(process.env.PI_GHOSTTY_BRANCHES_TEST_COLUMNS);
+	const terminalWidth = Math.max(20, Number.isFinite(testWidth) && testWidth > 0 ? testWidth : process.stdout.columns || 32);
 	// Keep the last terminal column empty. Filling it sets the terminal's pending
 	// autowrap flag and makes visual rows diverge from mouse-reported row numbers.
 	const width = terminalWidth - 1;
@@ -261,8 +391,10 @@ function render() {
 	const flattened = flattenTree(nodes);
 	if (!flattened.some((item) => item.node.sessionId === selectedId)) selectedId = flattened[0]?.node.sessionId;
 	const selectedIndex = Math.max(0, flattened.findIndex((item) => item.node.sessionId === selectedId));
+	const selected = flattened.find((item) => item.node.sessionId === selectedId)?.node;
+	const footer = buildFooter(nodes, selected, width);
 
-	const footerRows = confirmation ? 7 : renameEditor ? 6 : showLayoutControls ? 9 : 7;
+	const footerRows = footer.lines.length;
 	const treeStartRow = 3;
 	const treeHeight = Math.max(1, height - treeStartRow - footerRows + 1);
 	if (selectedIndex < scrollOffset) scrollOffset = selectedIndex;
@@ -286,110 +418,12 @@ function render() {
 		lines.push(nodeLine(item, item.node.sessionId === selectedId, width));
 	}
 
-	lines.push("─".repeat(width));
-	const selected = flattened.find((item) => item.node.sessionId === selectedId)?.node;
-	let row = lines.length + 1;
-
-	if (confirmation) {
-		lines.push(pad(truncate(`${color.bold}${color.yellow}Confirm action${color.reset}`, width), width));
-		const confirmationLines = wrapText(confirmation.text, width, 2);
-		lines.push(pad(confirmationLines[0] ?? "", width));
-		lines.push(pad(confirmationLines[1] ?? "", width));
-		row = lines.length + 1;
-		const choices = [];
-		addButton(choices, row, "↵ Confirm", "confirm", true);
-		addButton(choices, row, "Esc Cancel", "cancel", true);
-		lines.push(pad(truncate(choices.join(""), width), width));
-		lines.push(pad("", width));
-		lines.push(pad(truncate(`${color.dim}Enter/y confirm · Esc/n cancel${color.reset}`, width), width));
-	} else if (renameEditor) {
-		lines.push(pad(truncate(`${color.bold}${color.blue}Rename branch${color.reset}`, width), width));
-		const shownName = renameEditor.value || `${color.dim}${renameEditor.original}${color.reset}`;
-		const cursor = stripAnsi(shownName).length < width - 3 ? "▌" : "";
-		lines.push(pad(truncate(`> ${shownName}${cursor}`, width), width));
-		row = lines.length + 1;
-		const choices = [];
-		addButton(choices, row, "↵ Save", "save-rename", Boolean(renameEditor.value.trim()));
-		addButton(choices, row, "Esc Cancel", "cancel", true);
-		lines.push(pad(truncate(choices.join(""), width), width));
-		lines.push(pad("", width));
-		lines.push(pad(truncate(`${color.dim}Type a name · Enter save · Esc cancel${color.reset}`, width), width));
-	} else {
-		const globalActions = [];
-		const coordinatorAvailable = Boolean(findCoordinator(nodes));
-		addButton(globalActions, row, "n New Root", "new-root", coordinatorAvailable);
-		addButton(globalActions, row, "d Cleanup", "cleanup", coordinatorAvailable);
-		lines.push(pad(truncate(globalActions.join(""), width), width));
-
-		row = lines.length + 1;
-		const isMinimized = selected?.displayStatus === "minimized";
-		const isClosed = selected?.displayStatus === "closed";
-		const isInactive = isClosed || isMinimized;
-		const liveTerminal = Boolean(selected?.terminalId && !isInactive);
-		const primary = [];
-		if (isInactive) {
-			addButton(primary, row, isMinimized ? "o Restore" : "o Resume", "resume", Boolean(selected?.sessionFile));
-			addButton(primary, row, "x Remove", "remove", selected?.sessionId !== rootSessionId);
-			addButton(primary, row, "r Rename", "rename", Boolean(selected));
-		} else {
-			addButton(primary, row, "b Branch", "branch", Boolean(selected));
-			addButton(primary, row, "f Fold", "fold", Boolean(selected?.parentSessionId));
-			addButton(primary, row, "r Rename", "rename", Boolean(selected));
-		}
-		lines.push(pad(truncate(primary.join(""), width), width));
-
-		row = lines.length + 1;
-		const management = [];
-		if (isInactive) {
-			const stateText = isMinimized ? "Hidden · select or press o to restore" : "Closed · saved session retained";
-			lines.push(pad(truncate(`${color.dim}${stateText}${color.reset}`, width), width));
-		} else {
-			addButton(management, row, "↵ Focus", "focus", liveTerminal);
-			addButton(
-				management,
-				row,
-				"h Hide",
-				"minimize",
-				Boolean((selected?.parentSessionId || selected?.sessionId !== rootSessionId) && liveTerminal),
-			);
-			addButton(management, row, "c Close", "close", liveTerminal);
-			lines.push(pad(truncate(management.join(""), width), width));
-		}
-
-		if (showLayoutControls) {
-			row = lines.length + 1;
-			const horizontalResize = [];
-			if (isInactive) {
-				lines.push(pad("", width));
-			} else {
-				addButton(horizontalResize, row, "H Left", "resize-left", liveTerminal);
-				addButton(horizontalResize, row, "L Right", "resize-right", liveTerminal);
-				addButton(horizontalResize, row, "= Equal", "equalize", liveTerminal);
-				lines.push(pad(truncate(horizontalResize.join(""), width), width));
-			}
-
-			row = lines.length + 1;
-			const verticalResize = [];
-			if (isInactive) {
-				lines.push(pad("", width));
-			} else {
-				addButton(verticalResize, row, "K Up", "resize-up", liveTerminal);
-				addButton(verticalResize, row, "J Down", "resize-down", liveTerminal);
-				addButton(verticalResize, row, "z Zoom", "zoom", liveTerminal);
-				lines.push(pad(truncate(verticalResize.join(""), width), width));
-			}
-		}
-
-		row = lines.length + 1;
-		const sidebarSize = [];
-		const root = nodes.find((node) => node.sessionId === rootSessionId);
-		addButton(sidebarSize, row, "- Side", "sidebar-smaller", Boolean(root?.terminalId));
-		addButton(sidebarSize, row, "+ Side", "sidebar-larger", Boolean(getSidebarTerminalId()));
-		addButton(sidebarSize, row, showLayoutControls ? "l Done" : "l Layout", "toggle-layout", true);
-		lines.push(pad(truncate(sidebarSize.join(""), width), width));
-		lines.push(pad(truncate(`${color.dim}${statusMessage}${color.reset}`, width), width));
-		lines.push(pad(`${color.dim}click or shown keys · ↑↓ select · q sidebar${color.reset}`, width));
-	}
+	const footerStartRow = lines.length + 1;
+	buttonTargets = footer.targets.map((target) => ({
+		...target,
+		row: footerStartRow + target.rowOffset,
+	}));
+	lines.push(...footer.lines);
 
 	// Position every row explicitly instead of relying on LF/autowrap behavior.
 	const output = lines

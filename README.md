@@ -120,9 +120,10 @@ For a more pronounced native line between every Ghostty split, add a divider col
 
 ```ini
 split-divider-color = #7aa2f7
+window-padding-x = 6
 ```
 
-`#7aa2f7` is TokyoNight's primary blue. More subdued alternatives are `#565f89` and `#414868`. Validate and reload the terminal configuration:
+`#7aa2f7` is TokyoNight's primary blue. More subdued alternatives are `#565f89` and `#414868`. `window-padding-x` adds breathing room between terminal text and vertical split dividers; it applies to every Ghostty surface. Validate and reload the terminal configuration:
 
 ```bash
 ghostty +validate-config

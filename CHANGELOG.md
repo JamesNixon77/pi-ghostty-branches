@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.3
+
+- Wrap sidebar action buttons across rows instead of truncating options in narrow sidebars.
+- Document horizontal Ghostty padding around native split dividers.
+
 ## 0.1.2
 
 - Render full-width, theme-aware title banners and horizontal separators in managed Pi panes.

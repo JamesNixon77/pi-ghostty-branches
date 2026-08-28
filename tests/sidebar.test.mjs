@@ -18,11 +18,17 @@ async function writeNode(stateDir, node) {
 	await writeFile(join(nodesDir, `${node.sessionId}.json`), `${JSON.stringify(node)}\n`);
 }
 
-async function runSidebar(stateDir, rootSessionId, inputs) {
+async function runSidebar(stateDir, rootSessionId, inputs, environment = {}) {
 	const child = spawn(process.execPath, [sidebarPath, "--state-dir", stateDir, "--root", rootSessionId], {
-		stdio: ["pipe", "ignore", "pipe"],
+		stdio: ["pipe", "pipe", "pipe"],
+		env: { ...process.env, ...environment },
 	});
+	let stdout = "";
 	let stderr = "";
+	child.stdout.setEncoding("utf8");
+	child.stdout.on("data", (chunk) => {
+		stdout += chunk;
+	});
 	child.stderr.setEncoding("utf8");
 	child.stderr.on("data", (chunk) => {
 		stderr += chunk;
@@ -48,6 +54,7 @@ async function runSidebar(stateDir, rootSessionId, inputs) {
 		});
 	});
 	assert.equal(exitCode, 0, stderr);
+	return stdout;
 }
 
 async function readRequests(stateDir, sessionId) {
@@ -87,6 +94,23 @@ test("new root requires confirmation and targets the coordinator", async () => {
 		assert.equal(requests[0].action, "new-root");
 		assert.equal(requests[0].targetSessionId, sessionId);
 		assert.equal(requests[0].groupRootSessionId, sessionId);
+	} finally {
+		await rm(stateDir, { recursive: true, force: true });
+	}
+});
+
+test("narrow sidebars wrap action options instead of truncating them", async () => {
+	const stateDir = await mkdtemp(join(tmpdir(), "pi-ghostty-branches-"));
+	const sessionId = randomUUID();
+	try {
+		await writeNode(stateDir, rootNode(sessionId));
+		const output = await runSidebar(stateDir, sessionId, [], { PI_GHOSTTY_BRANCHES_TEST_COLUMNS: "20" });
+		const plain = output.replace(/\u001b\][^\u0007]*\u0007/g, "").replace(/\u001b\[[0-9;?]*[A-Za-z]/g, "");
+		assert.match(plain, /\[n New Root\]/);
+		assert.match(plain, /\[d Cleanup\]/);
+		assert.match(plain, /\[b Branch\]/);
+		assert.match(plain, /\[r Rename\]/);
+		assert.match(plain, /\[l Layout\]/);
 	} finally {
 		await rm(stateDir, { recursive: true, force: true });
 	}
