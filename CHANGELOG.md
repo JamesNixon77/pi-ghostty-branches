@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1
+
+- Remove the pseudo-sticky top title overlays that moved with Ghostty native scrollback.
+- Add a persistent bordered branch-status panel beside Pi's bottom editor/footer area.
+- Show the current branch name, access mode, branch count, and sidebar-selection highlight in that panel.
+
 ## 0.2.0
 
 - Make `/branch`, sidebar `b Branch`, and `Ctrl+Shift+B` create writable branches by default.

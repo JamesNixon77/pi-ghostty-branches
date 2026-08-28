@@ -225,85 +225,72 @@ export default function (pi: ExtensionAPI) {
 	let foldScanRunning = false;
 	let foldCreationRunning = false;
 	let shutdownDisposition: "closed" | "minimized" | undefined;
-	let paneTitlePresentation: { node: BranchNode; access: string; selected: boolean } | undefined;
-	let titleOverlayHandle: { hide(): void } | undefined;
-	let titleOverlayTui: { requestRender(): void } | undefined;
-	let lastPaneTitleKey: string | undefined;
-	let lastStatusText: string | undefined;
+	let paneBarPresentation:
+		| { node: BranchNode; access: string; selected: boolean; branchCount: number }
+		| undefined;
+	let paneBarTui: { requestRender(): void } | undefined;
+	let paneBarInstalled = false;
+	let lastPaneBarKey: string | undefined;
 
 	const rememberContext = (ctx: ExtensionContext): void => {
 		activeContext = ctx;
 	};
 
-	const applyPaneTitle = (ctx: ExtensionContext, node: BranchNode, selected: boolean): void => {
-		const access = node.access === "read-only" ? " · read-only" : "";
-		const presentationKey = `${node.label}\u0000${access}\u0000${selected}`;
-		if (presentationKey === lastPaneTitleKey) return;
-		lastPaneTitleKey = presentationKey;
-		paneTitlePresentation = { node, access, selected };
+	const applyPaneBar = (ctx: ExtensionContext, node: BranchNode, selected: boolean, branchCount: number): void => {
+		const access = node.access === "read-only" ? " · read-only" : " · writable";
+		const presentationKey = `${node.label}\u0000${access}\u0000${selected}\u0000${branchCount}`;
+		if (presentationKey === lastPaneBarKey) return;
+		lastPaneBarKey = presentationKey;
+		paneBarPresentation = { node, access, selected, branchCount };
 		ctx.ui.setTitle(`${selected ? "▶ " : ""}π · ${node.label}`);
 
-		if (!titleOverlayHandle && ctx.mode === "tui") {
-			ctx.ui.setHeader((tui) => {
-				titleOverlayTui = tui;
-				const component = {
-					render(width: number): string[] {
-						const presentation = paneTitlePresentation;
-						if (!presentation || width <= 0) return [];
-						const theme = ctx.ui.theme;
-						if (width < 3) return [theme.fg("borderMuted", "━".repeat(width))];
-						const { node: currentNode, access: currentAccess, selected: currentSelected } = presentation;
-						const innerWidth = width - 2;
-						const canHide = Boolean(currentNode.parentSessionId || currentNode.sessionId !== currentNode.rootSessionId);
-						const fullHideText = "[× Ctrl+Shift+H]";
-						const hideText = canHide ? (innerWidth >= 32 ? fullHideText : innerWidth >= 8 ? "[×]" : "") : "";
-						const hideWidth = visibleWidth(hideText);
-						const gapWidth = hideText ? 1 : 0;
-						const titleWidth = Math.max(1, innerWidth - hideWidth - gapWidth);
-						const titleText = truncateToWidth(
-							`${currentSelected ? "▶" : "◇"} ${currentNode.label}${currentAccess}`,
-							titleWidth,
-							"…",
-						);
-						const fillWidth = Math.max(0, innerWidth - visibleWidth(titleText) - hideWidth);
-						const title = theme.fg("accent", theme.bold(titleText));
-						const hide = hideText ? theme.fg("error", hideText) : "";
-						const content = ` ${title}${" ".repeat(fillWidth)}${hide} `;
-						const banner = theme.bg(currentSelected ? "selectedBg" : "customMessageBg", content);
-						const divider = theme.fg(currentSelected ? "borderAccent" : "borderMuted", "━".repeat(width));
-						return [banner, divider];
-					},
-					invalidate() {},
-				};
-				titleOverlayHandle = tui.showOverlay(component, {
-					row: 0,
-					col: 0,
-					width: "100%",
-					maxHeight: 2,
-					nonCapturing: true,
-				});
-				return new Text("", 0, 0);
-			});
+		if (!paneBarInstalled && ctx.mode === "tui") {
+			ctx.ui.setHeader(undefined);
+			ctx.ui.setStatus("ghostty-branches", undefined);
+			ctx.ui.setWidget(
+				"ghostty-branches-pane",
+				(tui) => {
+					paneBarTui = tui;
+					return {
+						render(width: number): string[] {
+							const presentation = paneBarPresentation;
+							if (!presentation || width <= 0) return [];
+							const theme = ctx.ui.theme;
+							if (width < 4) return [theme.fg("borderMuted", "─".repeat(width))];
+							const innerWidth = width - 2;
+							const marker = presentation.selected ? "● SELECTED" : "○";
+							const countLabel = `Branches: ${presentation.branchCount}`;
+							const plain = `${marker} · Branch: ${presentation.node.label}${presentation.access} · ${countLabel}`;
+							const fitted = truncateToWidth(plain, innerWidth, "…");
+							const padded = `${fitted}${" ".repeat(Math.max(0, innerWidth - visibleWidth(fitted)))}`;
+							const borderColor = presentation.selected ? "borderAccent" : "borderMuted";
+							const content = theme.fg(presentation.selected ? "accent" : "muted", padded);
+							const highlighted = presentation.selected ? theme.bg("selectedBg", theme.bold(content)) : content;
+							return [
+								theme.fg(borderColor, `╭${"─".repeat(innerWidth)}╮`),
+								theme.fg(borderColor, "│") + highlighted + theme.fg(borderColor, "│"),
+								theme.fg(borderColor, `╰${"─".repeat(innerWidth)}╯`),
+							];
+						},
+						invalidate() {},
+					};
+				},
+				{ placement: "belowEditor" },
+			);
+			paneBarInstalled = true;
 		} else {
-			titleOverlayTui?.requestRender();
+			paneBarTui?.requestRender();
 		}
 	};
 
 	const refreshPanePresentation = (ctx: ExtensionContext): void => {
 		const node = getNode(ctx.sessionManager.getSessionId());
 		if (!node) return;
-		applyPaneTitle(ctx, node, getSelectedSessionId(node.rootSessionId) === node.sessionId);
-	};
-
-	const refreshFooterStatus = (ctx: ExtensionContext): void => {
-		const node = getNode(ctx.sessionManager.getSessionId());
-		if (!node) return;
-		const activeCount = listNodes(node.rootSessionId).filter((candidate) => candidate.status !== "closed").length;
-		const text = `◇ ${Math.max(0, activeCount - 1)} branch${activeCount === 2 ? "" : "es"}`;
-		if (text !== lastStatusText) {
-			lastStatusText = text;
-			ctx.ui.setStatus("ghostty-branches", text);
-		}
+		const branchCount = Math.max(
+			0,
+			listNodes(node.rootSessionId).filter((candidate) => candidate.status !== "closed").length - 1,
+		);
+		applyPaneBar(ctx, node, getSelectedSessionId(node.rootSessionId) === node.sessionId, branchCount);
 	};
 
 	const ensureCurrentNode = async (ctx: ExtensionContext): Promise<BranchNode> => {
@@ -443,7 +430,7 @@ export default function (pi: ExtensionAPI) {
 				environment: inheritedChildEnvironment(),
 			});
 			updateNode(childNode.sessionId, { terminalId, status: "idle", lastError: undefined });
-			refreshFooterStatus(ctx);
+			refreshPanePresentation(ctx);
 			ctx.ui.notify(
 				`Created ${readOnly ? "read-only " : "writable "}branch “${childNode.label}” in a Ghostty split`,
 				"info",
@@ -848,7 +835,6 @@ export default function (pi: ExtensionAPI) {
 		await scanRequests();
 		await scanFoldInbox();
 		refreshPanePresentation(ctx);
-		refreshFooterStatus(ctx);
 	};
 
 	const openSidebar = async (ctx: ExtensionContext): Promise<void> => {
@@ -1050,7 +1036,7 @@ export default function (pi: ExtensionAPI) {
 		const node = getNode(ctx.sessionManager.getSessionId());
 		if (!node) return;
 		updateNode(node.sessionId, { label: event.name || node.label });
-		lastPaneTitleKey = undefined;
+		lastPaneBarKey = undefined;
 		refreshPanePresentation(ctx);
 	});
 
@@ -1070,15 +1056,13 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("session_shutdown", (event, ctx) => {
 		if (scanTimer) clearInterval(scanTimer);
-		titleOverlayHandle?.hide();
-		titleOverlayHandle = undefined;
-		titleOverlayTui = undefined;
-		paneTitlePresentation = undefined;
-		ctx.ui.setHeader(undefined);
+		ctx.ui.setWidget("ghostty-branches-pane", undefined, { placement: "belowEditor" });
+		paneBarTui = undefined;
+		paneBarPresentation = undefined;
+		paneBarInstalled = false;
 		scanTimer = undefined;
 		activeContext = undefined;
-		lastPaneTitleKey = undefined;
-		lastStatusText = undefined;
+		lastPaneBarKey = undefined;
 		ctx.ui.setStatus("ghostty-branches", undefined);
 		updateNode(ctx.sessionManager.getSessionId(), {
 			status: event.reason === "reload" ? "idle" : shutdownDisposition ?? "closed",

@@ -51,7 +51,7 @@ Start Pi inside Ghostty and run:
 /branches
 ```
 
-This creates a narrow native Ghostty split containing the branch sidebar. Click a row to select it without transferring keyboard focus; press Enter to focus the selected live Pi pane. From a Pi pane, press `Ctrl+Shift+S` to return to the existing sidebar.
+This creates a narrow native Ghostty split containing the branch sidebar. Click a row to select it without transferring keyboard focus; press Enter to focus the selected live Pi pane. Each Pi pane's bordered status panel near the bottom highlights when that pane is selected. From a Pi pane, press `Ctrl+Shift+S` to return to the existing sidebar.
 
 The ordinary workflow is:
 
@@ -117,7 +117,7 @@ A direction with no adjacent boundary has no effect. `/branches` detects an exis
 
 ## Visual separation
 
-Managed Pi panes render a fixed, full-width, theme-aware title banner followed by a horizontal separator. The banner is a non-capturing screen overlay, so it remains visible while the conversation scrolls and does not take keyboard focus. The pane selected in the sidebar uses Pi's accent background and border color; other panes use muted styling.
+Managed Pi panes render a persistent, theme-aware bordered status panel near Pi's bottom editor/footer area. It shows the current branch name, read-only/writable access mode, number of other active branches, and a `SELECTED` indicator controlled by the sidebar. The selected pane uses Pi's accent background and border color; other panes use muted styling. Keeping this panel at the bottom avoids pretending a terminal-drawn top bar can remain fixed while Ghostty displays native scrollback.
 
 For a more pronounced native line between every Ghostty split, add a divider color to your Ghostty config:
 
@@ -157,7 +157,7 @@ Ghostty cannot detach a live terminal TUI from a split. Hide is therefore sessio
 
 Both preserve the same Pi session data. Restore/Resume starts a new Pi process using that saved session.
 
-Child and additional-root headers display `[× hide: Ctrl+Shift+H]`. Stock Pi does not expose mouse hit-testing for header components, so the header X is currently a visible shortcut rather than a plain-click button. The sidebar's `h Hide` control is clickable.
+Press `Ctrl+Shift+H` inside a child or additional-root pane to hide it. The sidebar's `h Hide` control is also clickable. The extension intentionally does not render a pseudo-clickable top X because terminal-drawn top content moves with Ghostty's native scrollback in regular Pi mode.
 
 ## Concurrency and safety
 
