@@ -56,7 +56,7 @@ This creates a narrow native Ghostty split containing the branch sidebar. Click 
 The ordinary workflow is:
 
 1. Select a session in the sidebar.
-2. Click `b Branch` to create a read-only child, or use `/branch [goal]` from a Pi pane.
+2. Click `b Branch` to create a writable child, use `/branch [goal]` from a Pi pane, or choose `/branch-ro [goal]` for read-only investigation.
 3. Let parent and child sessions run independently.
 4. Click `f Fold` or run `/fold [instructions]` in the child.
 5. The child summarizes new findings into its parent and closes its Ghostty pane.
@@ -67,11 +67,13 @@ The ordinary workflow is:
 | --- | --- |
 | `/branches` | Open or focus the branch sidebar |
 | `/branches cleanup` | Confirm removal of stale runtime coordination data without deleting Pi sessions |
-| `/branch [goal]` | Create a read-only child; a supplied goal starts immediately |
-| `/branch-write [goal]` | Create a writable child in the same working directory |
+| `/branch [goal]` | Create a writable child in the shared working directory; a supplied goal starts immediately |
+| `/branch-ro [goal]` | Create a read-only child with `read`, `grep`, `find`, and `ls` only |
+| `/branch-read [goal]` | Alias for `/branch-ro` |
+| `/branch-write [goal]` | Backward-compatible alias for writable `/branch` |
 | `/branch-close` | Confirm closing this branch without sending context to its parent; retain the session for Resume |
 | `/fold [instructions]` | Fold this child branch's new findings into its immediate parent |
-| `Ctrl+Shift+B` | Create a read-only child while the current agent continues running |
+| `Ctrl+Shift+B` | Create a writable child while the current agent continues running |
 | `Ctrl+Shift+S` | Return focus to the branch sidebar |
 | `Ctrl+Shift+H` | Hide the current child/additional-root pane |
 
@@ -85,7 +87,7 @@ Every clickable action shows its keyboard equivalent.
 | --- | --- |
 | `n New Root` | Create an independent writable top-level session with no inherited conversation |
 | `d Cleanup` | Confirm cleanup of stale metadata, generated launchers, and abandoned temporary claims |
-| `b Branch` | Confirm creation of a read-only child from the selected session |
+| `b Branch` | Confirm creation of a writable child from the selected session; the prompt warns that the workspace is shared |
 | `f Fold` | Confirm folding a child into its parent; success closes the child pane |
 | `r Rename` | Rename the Pi session, sidebar row, and pane title |
 | `Enter / Focus` | Focus a live selected pane; offer Resume/Restore for an inactive pane |
@@ -159,9 +161,11 @@ Child and additional-root headers display `[× hide: Ctrl+Shift+H]`. Stock Pi do
 
 ## Concurrency and safety
 
-Read-only children are the default and receive only `read`, `grep`, `find`, and `ls`.
+Writable children are now the default for `/branch`, the sidebar's `b Branch`, and `Ctrl+Shift+B`. They share the same working directory as their coordinator. Multiple writable agents can overwrite each other's changes or run conflicting commands, so creation emits an explicit warning.
 
-`/branch-write` and `n New Root` use the same working directory as their coordinator. Multiple writable agents can overwrite each other's changes or run conflicting commands. Use writable sessions cautiously until isolated-worktree support exists.
+Use `/branch-ro` or `/branch-read` when a branch only needs to investigate. Read-only branches receive only `read`, `grep`, `find`, and `ls`.
+
+The current shared-write mode is not concurrency-safe. The evaluated guard designs and implementation plan are documented in [`docs/concurrency-guarding.md`](docs/concurrency-guarding.md). The recommended path is optimistic whole-file hash checks plus cross-process path locks as a near-term guard, followed by isolated workspace adapters as the actual safety boundary.
 
 Provider credentials and the invoking Pi environment are inherited by child Ghostty surfaces, while parent-specific session and terminal variables are excluded.
 

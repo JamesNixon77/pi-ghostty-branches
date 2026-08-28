@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0
+
+- Make `/branch`, sidebar `b Branch`, and `Ctrl+Shift+B` create writable branches by default.
+- Add `/branch-ro` and `/branch-read` for explicit read-only branches.
+- Keep `/branch-write` as a backward-compatible alias.
+- Document concurrency failure modes and a phased guarding design.
+
 ## 0.1.5
 
 - Add `/branch-close` to close a branch without folding context into its parent.

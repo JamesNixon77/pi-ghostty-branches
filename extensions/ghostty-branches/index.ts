@@ -405,7 +405,7 @@ export default function (pi: ExtensionAPI) {
 		}
 
 		const parentNode = await ensureCurrentNode(ctx);
-		const readOnly = options.readOnly ?? true;
+		const readOnly = options.readOnly ?? false;
 		const direction = options.direction ?? "right";
 		const { childNode, childSessionFile } = createSessionSnapshot(
 			ctx,
@@ -935,29 +935,36 @@ export default function (pi: ExtensionAPI) {
 		return new Text(theme.fg("accent", theme.bold("⇣ Folded branch findings")) + `\n${shown}`, 1, 0);
 	});
 
+	const createCommandBranch = async (args: string, ctx: ExtensionCommandContext, readOnly: boolean): Promise<void> => {
+		if (!readOnly) {
+			ctx.ui.notify("Writable branches share this working directory; concurrent edits may conflict", "warning");
+		}
+		await createBranch(ctx, {
+			goal: args.trim() || undefined,
+			direction: "right",
+			readOnly,
+			allowFocusedTerminalFallback: true,
+		});
+	};
+
 	pi.registerCommand("branch", {
-		description: "Create a read-only child session in a Ghostty split: /branch [goal]",
-		handler: async (args, ctx) => {
-			await createBranch(ctx, {
-				goal: args.trim() || undefined,
-				direction: "right",
-				readOnly: true,
-				allowFocusedTerminalFallback: true,
-			});
-		},
+		description: "Create a writable child session in a Ghostty split: /branch [goal]",
+		handler: async (args, ctx) => createCommandBranch(args, ctx, false),
+	});
+
+	pi.registerCommand("branch-ro", {
+		description: "Create a read-only child session: /branch-ro [goal]",
+		handler: async (args, ctx) => createCommandBranch(args, ctx, true),
+	});
+
+	pi.registerCommand("branch-read", {
+		description: "Alias for /branch-ro",
+		handler: async (args, ctx) => createCommandBranch(args, ctx, true),
 	});
 
 	pi.registerCommand("branch-write", {
-		description: "Create a writable child in the shared working directory (unsafe for concurrent edits)",
-		handler: async (args, ctx) => {
-			ctx.ui.notify("Writable first-pass branches share the same working directory; concurrent edits may conflict", "warning");
-			await createBranch(ctx, {
-				goal: args.trim() || undefined,
-				direction: "right",
-				readOnly: false,
-				allowFocusedTerminalFallback: true,
-			});
-		},
+		description: "Backward-compatible alias for writable /branch",
+		handler: async (args, ctx) => createCommandBranch(args, ctx, false),
 	});
 
 	pi.registerCommand("branches", {
@@ -1007,11 +1014,12 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.registerShortcut("ctrl+shift+b", {
-		description: "Branch current session into a Ghostty split",
+		description: "Create a writable branch in a Ghostty split",
 		handler: async (ctx) => {
+			ctx.ui.notify("Writable branches share this working directory; concurrent edits may conflict", "warning");
 			await createBranch(ctx, {
 				direction: "right",
-				readOnly: true,
+				readOnly: false,
 				allowFocusedTerminalFallback: true,
 			});
 		},

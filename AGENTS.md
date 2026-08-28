@@ -8,4 +8,4 @@ This repository is the canonical source for the Pi Ghostty Branches extension.
 - Before committing, run `node --check extensions/ghostty-branches/sidebar.mjs` and `node --test tests/*.test.mjs`.
 - Also smoke-load the package through Pi when extension APIs or package layout change.
 - Commit and push every functional change to `main`; bump `package.json` and add release notes when publishing a user-facing version.
-- Preserve safe defaults: child branches are read-only unless the user explicitly requests a writable branch.
+- Writable branches are the product default. Preserve `/branch-ro` and `/branch-read`, keep shared-workspace warnings explicit, and never claim concurrency safety without isolated workspaces.

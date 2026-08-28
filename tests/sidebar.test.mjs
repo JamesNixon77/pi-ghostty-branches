@@ -99,6 +99,24 @@ test("new root requires confirmation and targets the coordinator", async () => {
 	}
 });
 
+test("sidebar branches are writable by default", async () => {
+	const stateDir = await mkdtemp(join(tmpdir(), "pi-ghostty-branches-"));
+	const sessionId = randomUUID();
+	try {
+		await writeNode(stateDir, rootNode(sessionId));
+		await runSidebar(stateDir, sessionId, [
+			{ data: "b", delay: 200 },
+			{ data: "y" },
+		]);
+		const requests = await readRequests(stateDir, sessionId);
+		assert.equal(requests.length, 1);
+		assert.equal(requests[0].action, "branch");
+		assert.equal(requests[0].readOnly, false);
+	} finally {
+		await rm(stateDir, { recursive: true, force: true });
+	}
+});
+
 test("narrow sidebars wrap action options instead of truncating them", async () => {
 	const stateDir = await mkdtemp(join(tmpdir(), "pi-ghostty-branches-"));
 	const sessionId = randomUUID();

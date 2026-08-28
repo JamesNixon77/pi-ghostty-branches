@@ -483,7 +483,7 @@ function request(action, targetSessionId = selectedId, extra = {}) {
 		action,
 		targetSessionId: node.sessionId,
 		direction: action === "branch" ? "right" : undefined,
-		readOnly: action === "branch" ? true : undefined,
+		readOnly: action === "branch" ? false : undefined,
 		createdAt: new Date().toISOString(),
 		...extra,
 	};
@@ -513,7 +513,7 @@ function beginConfirmation(action, node) {
 		nodeId: node.sessionId,
 		text:
 			action === "branch"
-				? `Create a read-only child from “${node.label}”?`
+				? `Create a writable child from “${node.label}”? It will share this working directory.`
 				: action === "fold"
 					? `Fold “${node.label}” into “${parent?.label ?? "parent"}” and close it?`
 					: action === "resume"
