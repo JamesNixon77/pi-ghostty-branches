@@ -112,6 +112,24 @@ Advanced pane layout controls are hidden by default. Click `l Layout` or press `
 
 A direction with no adjacent boundary has no effect. `/branches` detects an existing sidebar by terminal ID and title and will not intentionally create a second sidebar merely because another pane is zoomed.
 
+## Visual separation
+
+Managed Pi panes render a full-width, theme-aware title banner followed by a horizontal separator. The pane selected in the sidebar uses Pi's accent background and border color; other panes use muted styling.
+
+For a more pronounced native line between every Ghostty split, add a divider color to your Ghostty config:
+
+```ini
+split-divider-color = #7aa2f7
+```
+
+`#7aa2f7` is TokyoNight's primary blue. More subdued alternatives are `#565f89` and `#414868`. Validate and reload the terminal configuration:
+
+```bash
+ghostty +validate-config
+```
+
+Then press Ghostty's default `Cmd+Shift+,` shortcut, or use its Reload Configuration action. Ghostty supports divider color but does not currently expose native divider thickness.
+
 ## Branch semantics
 
 ### Branching while an agent is working

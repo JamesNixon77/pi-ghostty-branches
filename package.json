@@ -1,6 +1,6 @@
 {
   "name": "pi-ghostty-branches",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "description": "Ghostty-native parallel session branches, navigation, and context folding for Pi.",
   "author": "James Nixon",

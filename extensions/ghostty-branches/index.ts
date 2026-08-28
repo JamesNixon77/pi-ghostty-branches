@@ -9,7 +9,7 @@ import {
 	type ExtensionContext,
 	type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
+import { Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { cleanupState, type CleanupResult } from "./cleanup.ts";
 import {
 	atomicWriteText,
@@ -239,11 +239,28 @@ export default function (pi: ExtensionAPI) {
 		lastPaneTitleKey = presentationKey;
 		ctx.ui.setTitle(`${selected ? "▶ " : ""}π · ${node.label}`);
 		ctx.ui.setHeader((_tui, theme) => {
-			const label = theme.fg("accent", theme.bold(`${selected ? "▶ " : "◇ "}${node.label}`));
 			const canHide = Boolean(node.parentSessionId || node.sessionId !== node.rootSessionId);
-			const hide = canHide ? theme.fg("error", "  [× hide: Ctrl+Shift+H]") : "";
-			const content = label + theme.fg("dim", access) + hide;
-			return new Text(selected ? theme.bg("selectedBg", content) : content, 1, 0);
+			return {
+				render(width: number): string[] {
+					if (width <= 0) return [];
+					if (width < 3) return [theme.fg("borderMuted", "━".repeat(width))];
+					const innerWidth = width - 2;
+					const fullHideText = "[× Ctrl+Shift+H]";
+					const hideText = canHide ? (innerWidth >= 32 ? fullHideText : innerWidth >= 8 ? "[×]" : "") : "";
+					const hideWidth = visibleWidth(hideText);
+					const gapWidth = hideText ? 1 : 0;
+					const titleWidth = Math.max(1, innerWidth - hideWidth - gapWidth);
+					const titleText = truncateToWidth(`${selected ? "▶" : "◇"} ${node.label}${access}`, titleWidth, "…");
+					const fillWidth = Math.max(0, innerWidth - visibleWidth(titleText) - hideWidth);
+					const title = theme.fg("accent", theme.bold(titleText));
+					const hide = hideText ? theme.fg("error", hideText) : "";
+					const content = ` ${title}${" ".repeat(fillWidth)}${hide} `;
+					const banner = theme.bg(selected ? "selectedBg" : "customMessageBg", content);
+					const divider = theme.fg(selected ? "borderAccent" : "borderMuted", "━".repeat(width));
+					return [banner, divider];
+				},
+				invalidate() {},
+			};
 		});
 	};
 

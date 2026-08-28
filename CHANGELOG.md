@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.2
+
+- Render full-width, theme-aware title banners and horizontal separators in managed Pi panes.
+- Strengthen selected-pane highlighting while retaining the header hide shortcut.
+- Document Ghostty's native `split-divider-color` option.
+
 ## 0.1.1
 
 - Add `/branches cleanup` and the sidebar `d Cleanup` action.
