@@ -114,7 +114,7 @@ A direction with no adjacent boundary has no effect. `/branches` detects an exis
 
 ## Visual separation
 
-Managed Pi panes render a full-width, theme-aware title banner followed by a horizontal separator. The pane selected in the sidebar uses Pi's accent background and border color; other panes use muted styling.
+Managed Pi panes render a fixed, full-width, theme-aware title banner followed by a horizontal separator. The banner is a non-capturing screen overlay, so it remains visible while the conversation scrolls and does not take keyboard focus. The pane selected in the sidebar uses Pi's accent background and border color; other panes use muted styling.
 
 For a more pronounced native line between every Ghostty split, add a divider color to your Ghostty config:
 

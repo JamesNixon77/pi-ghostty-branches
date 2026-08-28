@@ -225,6 +225,9 @@ export default function (pi: ExtensionAPI) {
 	let foldScanRunning = false;
 	let foldCreationRunning = false;
 	let shutdownDisposition: "closed" | "minimized" | undefined;
+	let paneTitlePresentation: { node: BranchNode; access: string; selected: boolean } | undefined;
+	let titleOverlayHandle: { hide(): void } | undefined;
+	let titleOverlayTui: { requestRender(): void } | undefined;
 	let lastPaneTitleKey: string | undefined;
 	let lastStatusText: string | undefined;
 
@@ -237,31 +240,53 @@ export default function (pi: ExtensionAPI) {
 		const presentationKey = `${node.label}\u0000${access}\u0000${selected}`;
 		if (presentationKey === lastPaneTitleKey) return;
 		lastPaneTitleKey = presentationKey;
+		paneTitlePresentation = { node, access, selected };
 		ctx.ui.setTitle(`${selected ? "▶ " : ""}π · ${node.label}`);
-		ctx.ui.setHeader((_tui, theme) => {
-			const canHide = Boolean(node.parentSessionId || node.sessionId !== node.rootSessionId);
-			return {
-				render(width: number): string[] {
-					if (width <= 0) return [];
-					if (width < 3) return [theme.fg("borderMuted", "━".repeat(width))];
-					const innerWidth = width - 2;
-					const fullHideText = "[× Ctrl+Shift+H]";
-					const hideText = canHide ? (innerWidth >= 32 ? fullHideText : innerWidth >= 8 ? "[×]" : "") : "";
-					const hideWidth = visibleWidth(hideText);
-					const gapWidth = hideText ? 1 : 0;
-					const titleWidth = Math.max(1, innerWidth - hideWidth - gapWidth);
-					const titleText = truncateToWidth(`${selected ? "▶" : "◇"} ${node.label}${access}`, titleWidth, "…");
-					const fillWidth = Math.max(0, innerWidth - visibleWidth(titleText) - hideWidth);
-					const title = theme.fg("accent", theme.bold(titleText));
-					const hide = hideText ? theme.fg("error", hideText) : "";
-					const content = ` ${title}${" ".repeat(fillWidth)}${hide} `;
-					const banner = theme.bg(selected ? "selectedBg" : "customMessageBg", content);
-					const divider = theme.fg(selected ? "borderAccent" : "borderMuted", "━".repeat(width));
-					return [banner, divider];
-				},
-				invalidate() {},
-			};
-		});
+
+		if (!titleOverlayHandle && ctx.mode === "tui") {
+			ctx.ui.setHeader((tui) => {
+				titleOverlayTui = tui;
+				const component = {
+					render(width: number): string[] {
+						const presentation = paneTitlePresentation;
+						if (!presentation || width <= 0) return [];
+						const theme = ctx.ui.theme;
+						if (width < 3) return [theme.fg("borderMuted", "━".repeat(width))];
+						const { node: currentNode, access: currentAccess, selected: currentSelected } = presentation;
+						const innerWidth = width - 2;
+						const canHide = Boolean(currentNode.parentSessionId || currentNode.sessionId !== currentNode.rootSessionId);
+						const fullHideText = "[× Ctrl+Shift+H]";
+						const hideText = canHide ? (innerWidth >= 32 ? fullHideText : innerWidth >= 8 ? "[×]" : "") : "";
+						const hideWidth = visibleWidth(hideText);
+						const gapWidth = hideText ? 1 : 0;
+						const titleWidth = Math.max(1, innerWidth - hideWidth - gapWidth);
+						const titleText = truncateToWidth(
+							`${currentSelected ? "▶" : "◇"} ${currentNode.label}${currentAccess}`,
+							titleWidth,
+							"…",
+						);
+						const fillWidth = Math.max(0, innerWidth - visibleWidth(titleText) - hideWidth);
+						const title = theme.fg("accent", theme.bold(titleText));
+						const hide = hideText ? theme.fg("error", hideText) : "";
+						const content = ` ${title}${" ".repeat(fillWidth)}${hide} `;
+						const banner = theme.bg(currentSelected ? "selectedBg" : "customMessageBg", content);
+						const divider = theme.fg(currentSelected ? "borderAccent" : "borderMuted", "━".repeat(width));
+						return [banner, divider];
+					},
+					invalidate() {},
+				};
+				titleOverlayHandle = tui.showOverlay(component, {
+					row: 0,
+					col: 0,
+					width: "100%",
+					maxHeight: 2,
+					nonCapturing: true,
+				});
+				return new Text("", 0, 0);
+			});
+		} else {
+			titleOverlayTui?.requestRender();
+		}
 	};
 
 	const refreshPanePresentation = (ctx: ExtensionContext): void => {
@@ -1007,6 +1032,11 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("session_shutdown", (event, ctx) => {
 		if (scanTimer) clearInterval(scanTimer);
+		titleOverlayHandle?.hide();
+		titleOverlayHandle = undefined;
+		titleOverlayTui = undefined;
+		paneTitlePresentation = undefined;
+		ctx.ui.setHeader(undefined);
 		scanTimer = undefined;
 		activeContext = undefined;
 		lastPaneTitleKey = undefined;

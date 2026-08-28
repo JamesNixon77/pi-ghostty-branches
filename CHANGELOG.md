@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.4
+
+- Render pane title bars as fixed, non-capturing overlays instead of scrollable transcript headers.
+- Keep sidebar-driven selected-pane highlighting visible while conversations scroll.
+
 ## 0.1.3
 
 - Wrap sidebar action buttons and footer help across rows instead of truncating content in narrow sidebars.
