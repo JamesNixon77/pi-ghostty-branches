@@ -69,6 +69,7 @@ The ordinary workflow is:
 | `/branches cleanup` | Confirm removal of stale runtime coordination data without deleting Pi sessions |
 | `/branch [goal]` | Create a read-only child; a supplied goal starts immediately |
 | `/branch-write [goal]` | Create a writable child in the same working directory |
+| `/branch-close` | Confirm closing this branch without sending context to its parent; retain the session for Resume |
 | `/fold [instructions]` | Fold this child branch's new findings into its immediate parent |
 | `Ctrl+Shift+B` | Create a read-only child while the current agent continues running |
 | `Ctrl+Shift+S` | Return focus to the branch sidebar |

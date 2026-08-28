@@ -529,6 +529,24 @@ export default function (pi: ExtensionAPI) {
 		ctx.shutdown();
 	};
 
+	const closeCurrentPane = (ctx: ExtensionContext, allowCoordinatingRoot = false): boolean => {
+		const node = getNode(ctx.sessionManager.getSessionId());
+		if (!node) {
+			ctx.ui.notify("This session is not registered in the branch sidebar", "warning");
+			return false;
+		}
+		if (!allowCoordinatingRoot && !node.parentSessionId && node.sessionId === node.rootSessionId) {
+			ctx.ui.notify("The coordinating root is not a branch; close it from the sidebar if intended", "warning");
+			return false;
+		}
+		shutdownDisposition = "closed";
+		updateNode(node.sessionId, { status: "closed" });
+		if (node.terminalId) scheduleTerminalClose(node.terminalId);
+		ctx.abort();
+		ctx.shutdown();
+		return true;
+	};
+
 	const resumeBranch = async (ctx: ExtensionContext, branchSessionId: string | undefined): Promise<void> => {
 		if (!branchSessionId) return;
 		const node = getNode(branchSessionId);
@@ -797,12 +815,7 @@ export default function (pi: ExtensionAPI) {
 					} else if (request.action === "minimize") {
 						hideCurrentPane(ctx);
 					} else {
-						const currentNode = getNode(ctx.sessionManager.getSessionId());
-						shutdownDisposition = "closed";
-						updateNode(ctx.sessionManager.getSessionId(), { status: "closed" });
-						if (currentNode?.terminalId) scheduleTerminalClose(currentNode.terminalId);
-						ctx.abort();
-						ctx.shutdown();
+						closeCurrentPane(ctx, true);
 					}
 				} finally {
 					removePath(claimed);
@@ -962,6 +975,23 @@ export default function (pi: ExtensionAPI) {
 	pi.registerCommand("branch-sidebar", {
 		description: "Alias for /branches",
 		handler: async (_args, ctx) => openSidebar(ctx),
+	});
+
+	pi.registerCommand("branch-close", {
+		description: "Close this branch without folding its context into the parent",
+		handler: async (_args, ctx) => {
+			const node = getNode(ctx.sessionManager.getSessionId());
+			if (!node || (!node.parentSessionId && node.sessionId === node.rootSessionId)) {
+				ctx.ui.notify("This is the coordinating root, not a disposable branch", "warning");
+				return;
+			}
+			const accepted = await ctx.ui.confirm(
+				"Close branch without folding?",
+				`Close “${node.label}” without sending any findings to its parent? The Pi session remains resumable.`,
+			);
+			if (!accepted) return;
+			closeCurrentPane(ctx);
+		},
 	});
 
 	pi.registerCommand("fold", {

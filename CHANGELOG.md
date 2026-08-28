@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.5
+
+- Add `/branch-close` to close a branch without folding context into its parent.
+- Preserve the closed branch's Pi session for later Resume.
+
 ## 0.1.4
 
 - Render pane title bars as fixed, non-capturing overlays instead of scrollable transcript headers.
