@@ -374,8 +374,10 @@ function buildFooter(nodes, selected, width) {
 		{ label: "+ Side", action: "sidebar-larger", enabled: Boolean(getSidebarTerminalId()) },
 		{ label: showLayoutControls ? "l Done" : "l Layout", action: "toggle-layout", enabled: true },
 	]);
-	addLine(`${color.dim}${statusMessage}${color.reset}`);
-	addLine(`${color.dim}click or shown keys · ↑↓ select · q sidebar${color.reset}`);
+	for (const line of wrapText(statusMessage, width, 3)) addLine(`${color.dim}${line}${color.reset}`);
+	for (const line of wrapText("click or shown keys · ↑↓ select · q sidebar", width, 4)) {
+		addLine(`${color.dim}${line}${color.reset}`);
+	}
 	return { lines, targets };
 }
 

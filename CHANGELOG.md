@@ -2,8 +2,9 @@
 
 ## 0.1.3
 
-- Wrap sidebar action buttons across rows instead of truncating options in narrow sidebars.
+- Wrap sidebar action buttons and footer help across rows instead of truncating content in narrow sidebars.
 - Document horizontal Ghostty padding around native split dividers.
+- Keep a branch open and avoid sending a parent message when there is nothing new to fold.
 
 ## 0.1.2
 

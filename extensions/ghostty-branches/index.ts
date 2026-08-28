@@ -611,6 +611,11 @@ export default function (pi: ExtensionAPI) {
 			const marker = node.lastFoldedEntryId ?? node.forkEntryId;
 			const markerIndex = marker ? branch.findIndex((entry) => entry.id === marker) : -1;
 			const delta = markerIndex >= 0 ? branch.slice(markerIndex + 1) : branch;
+			if (!serializeEntries(delta).trim()) {
+				updateNode(node.sessionId, { status: "idle", lastError: undefined });
+				ctx.ui.notify("Nothing new to fold; the branch remains open", "warning");
+				return;
+			}
 			const summary = await summarizeFold(ctx, node, delta, instructions);
 			const toEntryId = lastEntryId(branch);
 			writeFold({

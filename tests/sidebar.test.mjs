@@ -111,6 +111,8 @@ test("narrow sidebars wrap action options instead of truncating them", async () 
 		assert.match(plain, /\[b Branch\]/);
 		assert.match(plain, /\[r Rename\]/);
 		assert.match(plain, /\[l Layout\]/);
+		assert.match(plain, /click or shown/);
+		assert.match(plain, /q\s+sidebar/);
 	} finally {
 		await rm(stateDir, { recursive: true, force: true });
 	}
