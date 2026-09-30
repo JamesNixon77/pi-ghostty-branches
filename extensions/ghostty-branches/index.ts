@@ -41,6 +41,7 @@ import {
 	focusTerminal,
 	getFocusedTerminalId,
 	getPiInvocation,
+	inheritedChildEnvironment,
 	performTerminalAction,
 	isGhostty,
 	scheduleTerminalClose,
@@ -53,25 +54,6 @@ const SIDEBAR_PROGRAM = join(EXTENSION_DIR, "sidebar.mjs");
 const SCAN_INTERVAL_MS = 350;
 const READ_ONLY_TOOLS = "read,grep,find,ls";
 const MAX_FOLD_INPUT_CHARS = 100_000;
-const CHILD_ENVIRONMENT_DENYLIST = new Set([
-	"AI_AGENT",
-	"COLORTERM",
-	"OLDPWD",
-	"PI_CODING_AGENT",
-	"PI_MODEL",
-	"PI_PROVIDER",
-	"PI_REASONING_LEVEL",
-	"PI_SESSION_FILE",
-	"PI_SESSION_ID",
-	"PWD",
-	"SHLVL",
-	"TERM",
-	"TERMINFO",
-	"TERM_PROGRAM",
-	"TERM_PROGRAM_VERSION",
-	"TERM_SESSION_ID",
-	"_",
-]);
 
 const FOLD_SYSTEM_PROMPT = `You merge findings from a parallel coding-agent branch back into its parent. Summarize only useful new information from the branch delta.
 
@@ -95,21 +77,6 @@ function processIsAlive(pid: number): boolean {
 	} catch {
 		return false;
 	}
-}
-
-/**
- * Ghostty creates splits from the GUI application's environment, not from the
- * shell process requesting the split. Recreate normal child-process inheritance
- * while leaving terminal- and session-specific values for Ghostty/Pi to set.
- */
-function inheritedChildEnvironment(): Record<string, string> {
-	const inherited: Record<string, string> = {};
-	for (const [key, value] of Object.entries(process.env)) {
-		if (value === undefined || CHILD_ENVIRONMENT_DENYLIST.has(key)) continue;
-		if (key.startsWith("GHOSTTY_") || key.startsWith("ITERM_")) continue;
-		inherited[key] = value;
-	}
-	return inherited;
 }
 
 function getTextContent(content: unknown): string {

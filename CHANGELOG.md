@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.2
+
+- Stop forwarding Pi's installation-specific `PI_PACKAGE_DIR` into new Ghostty panes.
+- Keep branching and resuming working from parent panes that remain open across a Pi upgrade.
+
 ## 0.2.1
 
 - Remove the pseudo-sticky top title overlays that moved with Ghostty native scrollback.

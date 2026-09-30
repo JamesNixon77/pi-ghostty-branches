@@ -3,6 +3,46 @@ import { existsSync } from "node:fs";
 import { basename } from "node:path";
 import type { SplitDirection } from "./state.ts";
 
+const CHILD_ENVIRONMENT_DENYLIST = new Set([
+	"AI_AGENT",
+	"COLORTERM",
+	"OLDPWD",
+	"PI_CODING_AGENT",
+	"PI_MODEL",
+	"PI_PACKAGE_DIR",
+	"PI_PROVIDER",
+	"PI_REASONING_LEVEL",
+	"PI_SESSION_FILE",
+	"PI_SESSION_ID",
+	"PWD",
+	"SHLVL",
+	"TERM",
+	"TERMINFO",
+	"TERM_PROGRAM",
+	"TERM_PROGRAM_VERSION",
+	"TERM_SESSION_ID",
+	"_",
+]);
+
+/**
+ * Ghostty creates splits from the GUI application's environment, not from the
+ * shell process requesting the split. Recreate normal child-process inheritance
+ * while leaving terminal- and session-specific values for Ghostty/Pi to set.
+ *
+ * PI_PACKAGE_DIR is tied to the exact Pi installation. A parent pane can outlive
+ * a Pi upgrade, so forwarding that path can make the child run the parent's
+ * still-available executable against package assets that have been removed.
+ */
+export function inheritedChildEnvironment(environment: NodeJS.ProcessEnv = process.env): Record<string, string> {
+	const inherited: Record<string, string> = {};
+	for (const [key, value] of Object.entries(environment)) {
+		if (value === undefined || CHILD_ENVIRONMENT_DENYLIST.has(key)) continue;
+		if (key.startsWith("GHOSTTY_") || key.startsWith("ITERM_")) continue;
+		inherited[key] = value;
+	}
+	return inherited;
+}
+
 function appleScriptQuote(value: string): string {
 	return value.replace(/\\/g, "\\\\").replace(/\"/g, '\\"').replace(/\r/g, "\\r").replace(/\n/g, "\\n");
 }
