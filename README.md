@@ -110,7 +110,7 @@ Advanced pane layout controls are hidden by default. Click `l Layout` or press `
 | --- | --- |
 | `H Left` / `L Right` | Move a vertical split boundary to change width |
 | `K Up` / `J Down` | Move a horizontal split boundary to change height |
-| `= Equal` | Ask Ghostty to distribute split space equally |
+| `= Equal` | Distribute split space equally among Pi panes, keeping the sidebar's width |
 | `z Zoom` | Toggle Ghostty zoom for the selected pane |
 
 A direction with no adjacent boundary has no effect. `/branches` detects an existing sidebar by terminal ID and title and will not intentionally create a second sidebar merely because another pane is zoomed.

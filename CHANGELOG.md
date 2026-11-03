@@ -4,6 +4,7 @@
 
 - Identify each Pi pane by briefly setting a unique title, instead of assuming the focused pane is Pi's own. `/branch` no longer opens next to another session when Pi started or resumed while a different tab had focus.
 - Drop a recorded pane ID once that pane is gone, so splits rebind instead of failing with "terminal not found".
+- Make `= Equal` share space among the Pi panes only. The sidebar now keeps its width instead of widening to an equal share.
 
 ## 0.2.2
 

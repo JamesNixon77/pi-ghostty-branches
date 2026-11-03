@@ -109,6 +109,66 @@ function getSidebarTerminalId() {
 	return readJson(sidebarRecord)?.terminalId;
 }
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Wait for Ghostty to apply a split change to this pane, then for the width to
+ * settle. Returns the column count, which is unchanged if nothing happened.
+ */
+async function waitForColumnChange(previous, timeoutMs = 600) {
+	const deadline = Date.now() + timeoutMs;
+	while (process.stdout.columns === previous && Date.now() < deadline) await sleep(25);
+	let columns = process.stdout.columns;
+	while (Date.now() < deadline) {
+		await sleep(60);
+		if (process.stdout.columns === columns) break;
+		columns = process.stdout.columns;
+	}
+	return process.stdout.columns;
+}
+
+let equalizing = false;
+
+/**
+ * Ghostty's equalize_splits treats the sidebar as one more pane and gives it an
+ * equal share of the tab. Equalize, then move the sidebar's edge back to its
+ * previous width so only the Pi panes share the space.
+ *
+ * Ghostty's AppleScript API reports no pane sizes and resize_split takes points,
+ * not columns, so converge on the old column count by measuring this pane.
+ */
+async function equalizeExceptSidebar(targetTerminalId) {
+	if (equalizing) return;
+	equalizing = true;
+	try {
+		const sidebarTerminalId = getSidebarTerminalId();
+		const target = process.stdout.columns;
+		if (!performAction(targetTerminalId ?? sidebarTerminalId, "equalize_splits")) return;
+		if (!sidebarTerminalId || !process.stdout.isTTY || !target) return;
+
+		let columns = await waitForColumnChange(target);
+		// Typical monospace cell width in points; refined from each observed step.
+		let pointsPerColumn = 8;
+		for (let attempt = 0; attempt < 4 && columns !== target && !stopped; attempt++) {
+			const missing = target - columns;
+			const amount = Math.max(1, Math.round(Math.abs(missing) * pointsPerColumn));
+			const direction = missing > 0 ? "right" : "left";
+			if (!performAction(sidebarTerminalId, `resize_split:${direction},${amount}`)) return;
+			const next = await waitForColumnChange(columns);
+			if (next === columns) break;
+			pointsPerColumn = amount / Math.abs(next - columns);
+			columns = next;
+		}
+		statusMessage =
+			columns === target
+				? "Equalized panes; sidebar width kept"
+				: "Equalized panes; use -/+ Side to adjust the sidebar";
+		scheduleRender();
+	} finally {
+		equalizing = false;
+	}
+}
+
 function processIsAlive(pid) {
 	if (!Number.isInteger(pid) || pid <= 0) return false;
 	try {
@@ -744,7 +804,7 @@ function runAction(action) {
 			scheduleRender();
 			return;
 		case "equalize":
-			if (node) performAction(node.terminalId, "equalize_splits");
+			if (node) void equalizeExceptSidebar(node.terminalId);
 			return;
 		case "zoom":
 			if (node) performAction(node.terminalId, "toggle_split_zoom");
