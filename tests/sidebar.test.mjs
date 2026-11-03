@@ -170,3 +170,52 @@ test("h requests hiding the selected child", async () => {
 		await rm(stateDir, { recursive: true, force: true });
 	}
 });
+
+test("p pulls from the selected child without confirmation or closing it", async () => {
+	const stateDir = await mkdtemp(join(tmpdir(), "pi-ghostty-branches-"));
+	const rootSessionId = randomUUID();
+	const childSessionId = randomUUID();
+	const now = new Date().toISOString();
+	try {
+		await writeNode(stateDir, rootNode(rootSessionId));
+		await writeNode(stateDir, {
+			version: 1,
+			sessionId: childSessionId,
+			sessionFile: "/tmp/child.jsonl",
+			parentSessionId: rootSessionId,
+			rootSessionId,
+			cwd: "/tmp",
+			label: "child",
+			access: "shared-write",
+			status: "working",
+			pid: process.pid,
+			terminalId: "fake-child-terminal",
+			createdAt: now,
+			updatedAt: now,
+		});
+		const output = await runSidebar(stateDir, rootSessionId, [
+			{ data: "\u001b[B", delay: 200 },
+			{ data: "p" },
+		]);
+		const plain = output.replace(/\u001b\][^\u0007]*\u0007/g, "").replace(/\u001b\[[0-9;?]*[A-Za-z]/g, "");
+		assert.match(plain, /\[p Pull\]/);
+		const requests = await readRequests(stateDir, childSessionId);
+		assert.equal(requests.length, 1);
+		assert.equal(requests[0].action, "push");
+		assert.equal(requests[0].targetSessionId, childSessionId);
+	} finally {
+		await rm(stateDir, { recursive: true, force: true });
+	}
+});
+
+test("p on the root session sends no request", async () => {
+	const stateDir = await mkdtemp(join(tmpdir(), "pi-ghostty-branches-"));
+	const sessionId = randomUUID();
+	try {
+		await writeNode(stateDir, rootNode(sessionId));
+		await runSidebar(stateDir, sessionId, [{ data: "p", delay: 200 }]);
+		await assert.rejects(readRequests(stateDir, sessionId), { code: "ENOENT" });
+	} finally {
+		await rm(stateDir, { recursive: true, force: true });
+	}
+});

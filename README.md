@@ -58,8 +58,8 @@ The ordinary workflow is:
 1. Select a session in the sidebar.
 2. Click `b Branch` to create a writable child, use `/branch [goal]` from a Pi pane, or choose `/branch-ro [goal]` for read-only investigation.
 3. Let parent and child sessions run independently.
-4. Click `f Fold` or run `/fold [instructions]` in the child.
-5. The child summarizes new findings into its parent and closes its Ghostty pane.
+4. To share progress while the child keeps working, click `p Pull` in the sidebar or run `/push [instructions]` in the child.
+5. When the child is done, click `f Fold` or run `/fold [instructions]` in it. The child summarizes its new findings into its parent and closes its Ghostty pane.
 
 ## Pi commands and shortcuts
 
@@ -72,7 +72,8 @@ The ordinary workflow is:
 | `/branch-read [goal]` | Alias for `/branch-ro` |
 | `/branch-write [goal]` | Backward-compatible alias for writable `/branch` |
 | `/branch-close` | Confirm closing this branch without sending context to its parent; retain the session for Resume |
-| `/fold [instructions]` | Fold this child branch's new findings into its immediate parent |
+| `/push [instructions]` | Send this child branch's new findings to its immediate parent and keep the branch open |
+| `/fold [instructions]` | Fold this child branch's new findings into its immediate parent and close the branch |
 | `Ctrl+Shift+B` | Create a writable child while the current agent continues running |
 | `Ctrl+Shift+S` | Return focus to the branch sidebar |
 | `Ctrl+Shift+H` | Hide the current child/additional-root pane |
@@ -88,6 +89,7 @@ Every clickable action shows its keyboard equivalent.
 | `n New Root` | Create an independent writable top-level session with no inherited conversation |
 | `d Cleanup` | Confirm cleanup of stale metadata, generated launchers, and abandoned temporary claims |
 | `b Branch` | Confirm creation of a writable child from the selected session; the prompt warns that the workspace is shared |
+| `p Pull` | Ask the selected child to push its new findings to its parent; the child stays open |
 | `f Fold` | Confirm folding a child into its parent; success closes the child pane |
 | `r Rename` | Rename the Pi session, sidebar row, and pane title |
 | `Enter / Focus` | Focus a live selected pane; offer Resume/Restore for an inactive pane |
@@ -142,11 +144,13 @@ Extension commands and shortcuts execute immediately while Pi is streaming. The 
 
 Pi only persists finalized messages. A snapshot therefore includes the active user request but not an unfinished assistant response. If a tool batch is active, the extension rolls the child snapshot back to the last protocol-safe point without unmatched tool calls.
 
-### Folding
+### Folding, pushing, and pulling
 
-A fold summarizes only entries created after the fork point (or after the previous fold cursor). The summary includes decisions, evidence, relevant files, commands/tests, changes, risks, and next steps. It is delivered to the parent as a Pi custom context message.
+A fold summarizes only entries created after the fork point (or after the previous fold or push). The summary includes decisions, evidence, relevant files, commands/tests, changes, risks, and next steps. It is delivered to the parent as a Pi custom context message.
 
 Fold packets are stored durably, so a temporarily unavailable parent can consume them when it runs again. A successful fold closes the child pane but does not delete the child session file.
+
+A push sends the same kind of summary but leaves the child running. Run `/push` in the child, or select the child in the sidebar and use `p Pull`, which asks the child to push. Pushing works while the child is mid-turn. It covers finalized entries up to the last point without an unfinished tool call, so the next push or fold picks up the rest. Pushes and folds share one cursor, so each delivery contains only work done since the previous one. The parent receives pushed findings once it is idle.
 
 ### Hide versus close
 

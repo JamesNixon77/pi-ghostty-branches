@@ -595,7 +595,7 @@ export default function (pi: ExtensionAPI) {
 
 		const userText = [
 			node.goal ? `Branch goal: ${node.goal}` : undefined,
-			instructions?.trim() ? `Additional fold instructions: ${instructions.trim()}` : undefined,
+			instructions?.trim() ? `Additional instructions: ${instructions.trim()}` : undefined,
 			"Branch delta:",
 			transcript,
 		]
@@ -628,29 +628,46 @@ export default function (pi: ExtensionAPI) {
 		}
 	};
 
-	const createFold = async (ctx: ExtensionContext, instructions?: string): Promise<void> => {
-		if (foldCreationRunning) return;
+	/**
+	 * Summarize this branch's entries since the last fold or push and deliver them
+	 * to the parent's inbox. A fold then closes the branch; a push leaves it running.
+	 * Both advance the same cursor, so each delivery covers only new work.
+	 */
+	const sendFindings = async (ctx: ExtensionContext, kind: "fold" | "push", instructions?: string): Promise<void> => {
+		if (foldCreationRunning) {
+			ctx.ui.notify("A fold or push is already in progress", "warning");
+			return;
+		}
 		const node = getNode(ctx.sessionManager.getSessionId());
 		if (!node?.parentSessionId) {
-			ctx.ui.notify("This is a root session and has no parent to fold into", "warning");
+			ctx.ui.notify(`This is a root session and has no parent to ${kind} to`, "warning");
 			return;
 		}
 
+		const restingStatus = (): BranchNode["status"] => (ctx.isIdle() ? "idle" : "working");
 		foldCreationRunning = true;
 		updateNode(node.sessionId, { status: "folding" });
 		try {
-			const branch = ctx.sessionManager.getBranch();
+			// A push can run while the branch is mid-turn. Stop before any tool call
+			// still awaiting its result so the next delivery picks it up whole.
+			const branch = protocolSafePrefix(ctx.sessionManager.getBranch());
 			const marker = node.lastFoldedEntryId ?? node.forkEntryId;
 			const markerIndex = marker ? branch.findIndex((entry) => entry.id === marker) : -1;
 			const delta = markerIndex >= 0 ? branch.slice(markerIndex + 1) : branch;
 			if (!serializeEntries(delta).trim()) {
-				updateNode(node.sessionId, { status: "idle", lastError: undefined });
-				ctx.ui.notify("Nothing new to fold; the branch remains open", "warning");
+				updateNode(node.sessionId, { status: restingStatus(), lastError: undefined });
+				ctx.ui.notify(
+					kind === "fold"
+						? "Nothing new to fold; the branch remains open"
+						: "Nothing new to push since the last push or fold",
+					"warning",
+				);
 				return;
 			}
 			const summary = await summarizeFold(ctx, node, delta, instructions);
 			const toEntryId = lastEntryId(branch);
 			writeFold({
+				kind,
 				childSessionId: node.sessionId,
 				parentSessionId: node.parentSessionId,
 				fromEntryId: marker,
@@ -658,20 +675,21 @@ export default function (pi: ExtensionAPI) {
 				summary,
 				childSessionFile: node.sessionFile,
 			});
+			const cursor = { lastFoldedEntryId: toEntryId, lastFoldedAt: new Date().toISOString(), lastError: undefined };
+			if (kind === "push") {
+				updateNode(node.sessionId, { ...cursor, status: restingStatus() });
+				ctx.ui.notify("Findings pushed to the parent session; this branch stays open", "info");
+				return;
+			}
 			shutdownDisposition = "closed";
-			updateNode(node.sessionId, {
-				status: "closed",
-				lastFoldedEntryId: toEntryId,
-				lastFoldedAt: new Date().toISOString(),
-				lastError: undefined,
-			});
+			updateNode(node.sessionId, { ...cursor, status: "closed" });
 			if (node.terminalId) scheduleTerminalClose(node.terminalId);
 			ctx.ui.notify("Fold sent to the parent session; closing this branch", "info");
 			ctx.shutdown();
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			updateNode(node.sessionId, { status: "error", lastError: message });
-			ctx.ui.notify(`Could not fold branch: ${message}`, "error");
+			ctx.ui.notify(`Could not ${kind} branch findings: ${message}`, "error");
 		} finally {
 			foldCreationRunning = false;
 		}
@@ -689,20 +707,25 @@ export default function (pi: ExtensionAPI) {
 		if (foldAlreadyInjected(ctx, packet.id)) return;
 		const child = getNode(packet.childSessionId);
 		const label = child?.label ?? packet.childSessionId.slice(0, 8);
+		const pushed = packet.kind === "push";
+		const lead = pushed
+			? `Parallel branch “${label}” pushed these findings to this session. The branch is still open and may keep working:`
+			: `Parallel branch “${label}” folded these findings into this session:`;
 		pi.sendMessage(
 			{
 				customType: "ghostty-branch-fold",
-				content: `Parallel branch “${label}” folded these findings into this session:\n\n${packet.summary}`,
+				content: `${lead}\n\n${packet.summary}`,
 				display: true,
 				details: {
 					foldId: packet.id,
+					kind: packet.kind ?? "fold",
 					childSessionId: packet.childSessionId,
 					childSessionFile: packet.childSessionFile,
 				},
 			},
 			{ triggerTurn: false },
 		);
-		ctx.ui.notify(`Received folded findings from “${label}”`, "info");
+		ctx.ui.notify(`Received ${pushed ? "pushed" : "folded"} findings from “${label}”`, "info");
 	};
 
 	const scanFoldInbox = async (): Promise<void> => {
@@ -778,8 +801,8 @@ export default function (pi: ExtensionAPI) {
 							readOnly: request.readOnly,
 							allowFocusedTerminalFallback: false,
 						});
-					} else if (request.action === "fold") {
-						await createFold(ctx, request.instructions);
+					} else if (request.action === "fold" || request.action === "push") {
+						await sendFindings(ctx, request.action, request.instructions);
 					} else if (request.action === "rename") {
 						const name = request.name?.trim();
 						const renamedSessionId = request.branchSessionId ?? ctx.sessionManager.getSessionId();
@@ -920,7 +943,9 @@ export default function (pi: ExtensionAPI) {
 		const text = getTextContent(message.content);
 		const lines = text.split("\n");
 		const shown = expanded || lines.length <= 14 ? text : `${lines.slice(0, 14).join("\n")}\n… (Ctrl+O to expand)`;
-		return new Text(theme.fg("accent", theme.bold("⇣ Folded branch findings")) + `\n${shown}`, 1, 0);
+		const pushed = (message.details as { kind?: string } | undefined)?.kind === "push";
+		const heading = pushed ? "⇣ Pushed branch findings" : "⇣ Folded branch findings";
+		return new Text(theme.fg("accent", theme.bold(heading)) + `\n${shown}`, 1, 0);
 	});
 
 	const createCommandBranch = async (args: string, ctx: ExtensionCommandContext, readOnly: boolean): Promise<void> => {
@@ -997,7 +1022,15 @@ export default function (pi: ExtensionAPI) {
 				await ctx.waitForIdle();
 			}
 			rememberContext(ctx);
-			await createFold(ctx, args.trim() || undefined);
+			await sendFindings(ctx, "fold", args.trim() || undefined);
+		},
+	});
+
+	pi.registerCommand("push", {
+		description: "Send this branch's new findings to its parent and keep working: /push [instructions]",
+		handler: async (args, ctx: ExtensionCommandContext) => {
+			rememberContext(ctx);
+			await sendFindings(ctx, "push", args.trim() || undefined);
 		},
 	});
 

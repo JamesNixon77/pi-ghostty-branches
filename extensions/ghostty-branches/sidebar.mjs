@@ -396,6 +396,7 @@ function buildFooter(nodes, selected, width) {
 	} else {
 		addButtons([
 			{ label: "b Branch", action: "branch", enabled: Boolean(selected) },
+			{ label: "p Pull", action: "pull", enabled: Boolean(selected?.parentSessionId) },
 			{ label: "f Fold", action: "fold", enabled: Boolean(selected?.parentSessionId) },
 			{ label: "r Rename", action: "rename", enabled: Boolean(selected) },
 		]);
@@ -531,8 +532,8 @@ function request(action, targetSessionId = selectedId, extra = {}) {
 	const nodes = readNodes();
 	const node = nodes.find((candidate) => candidate.sessionId === targetSessionId);
 	if (!node) return;
-	if (action === "fold" && !node.parentSessionId) {
-		statusMessage = "The root session cannot be folded";
+	if ((action === "fold" || action === "push") && !node.parentSessionId) {
+		statusMessage = action === "fold" ? "The root session cannot be folded" : "The root session has no parent to pull into";
 		scheduleRender();
 		return;
 	}
@@ -550,6 +551,7 @@ function request(action, targetSessionId = selectedId, extra = {}) {
 	atomicWriteJson(join(requestsDir, node.sessionId, `${id}.json`), request);
 	if (action === "branch") statusMessage = `Branch requested from “${node.label}”`;
 	else if (action === "fold") statusMessage = `Fold requested for “${node.label}”`;
+	else if (action === "push") statusMessage = `Pulling findings from “${node.label}” into its parent`;
 	else if (action === "rename") statusMessage = `Renamed branch to “${extra.name}”`;
 	else if (action === "resume") statusMessage = "Resume request sent";
 	else if (action === "new-root") statusMessage = "New root session requested";
@@ -740,6 +742,12 @@ function runAction(action) {
 			if (inactive) beginConfirmation("resume", node);
 			else beginConfirmation("fold", node);
 			return;
+		case "pull":
+			// Pulling leaves the child running, so it needs no confirmation. The child
+			// does the work: it summarizes its own session and pushes to its parent.
+			if (inactive) beginConfirmation("resume", node);
+			else if (node) request("push", node.sessionId);
+			return;
 		case "new-root":
 			beginNewRoot();
 			return;
@@ -894,6 +902,7 @@ function handleInput(data) {
 	if (keyboard.includes("d")) return runAction("cleanup");
 	if (keyboard.includes("b")) return runAction("branch");
 	if (keyboard.includes("f")) return runAction("fold");
+	if (keyboard.includes("p")) return runAction("pull");
 	if (keyboard.includes("r")) return runAction("rename");
 	if (keyboard.includes("o")) return runAction("resume");
 	if (keyboard.includes("x")) return runAction("remove");

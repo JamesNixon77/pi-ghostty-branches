@@ -42,7 +42,7 @@ export interface BranchNode {
 export interface BranchRequest {
 	version: 1;
 	id: string;
-	action: "branch" | "fold" | "rename" | "close" | "minimize" | "resume" | "new-root" | "cleanup";
+	action: "branch" | "fold" | "push" | "rename" | "close" | "minimize" | "resume" | "new-root" | "cleanup";
 	targetSessionId: string;
 	branchSessionId?: string;
 	groupRootSessionId?: string;
@@ -54,9 +54,11 @@ export interface BranchRequest {
 	createdAt: string;
 }
 
+/** Findings sent from a child to its parent. A fold closes the child; a push leaves it open. */
 export interface FoldPacket {
 	version: 1;
 	id: string;
+	kind?: "fold" | "push";
 	childSessionId: string;
 	parentSessionId: string;
 	fromEntryId?: string;
