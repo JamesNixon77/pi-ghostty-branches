@@ -147,6 +147,29 @@ end tell`;
 	return (await runAppleScript(script)) || undefined;
 }
 
+/**
+ * Poll until a terminal shows `title`. Ghostty applies a title change
+ * asynchronously, so a single lookup right after setting it can miss.
+ */
+export async function waitForTerminalByTitle(
+	title: string,
+	options: {
+		timeoutMs?: number;
+		intervalMs?: number;
+		find?: (title: string) => Promise<string | undefined>;
+	} = {},
+): Promise<string | undefined> {
+	const find = options.find ?? findTerminalByTitle;
+	const intervalMs = options.intervalMs ?? 100;
+	const deadline = Date.now() + (options.timeoutMs ?? 1500);
+	for (;;) {
+		const terminalId = await find(title).catch(() => undefined);
+		if (terminalId) return terminalId;
+		if (Date.now() >= deadline) return undefined;
+		await new Promise((resolve) => setTimeout(resolve, intervalMs));
+	}
+}
+
 export async function focusTerminal(terminalId: string): Promise<boolean> {
 	const script = `tell application "Ghostty"
   set matches to every terminal whose id is "${appleScriptQuote(terminalId)}"

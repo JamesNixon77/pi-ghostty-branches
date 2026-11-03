@@ -47,6 +47,7 @@ import {
 	scheduleTerminalClose,
 	splitTerminal,
 	terminalExists,
+	waitForTerminalByTitle,
 } from "./ghostty.ts";
 
 const EXTENSION_DIR = dirname(fileURLToPath(import.meta.url));
@@ -260,12 +261,40 @@ export default function (pi: ExtensionAPI) {
 		applyPaneBar(ctx, node, getSelectedSessionId(node.rootSessionId) === node.sessionId, branchCount);
 	};
 
+	/** The node's cached Ghostty terminal ID, or undefined if that pane no longer exists. */
+	const liveTerminalId = async (sessionId: string): Promise<string | undefined> => {
+		const terminalId = getNode(sessionId)?.terminalId;
+		if (!terminalId) return undefined;
+		if (await terminalExists(terminalId).catch(() => false)) return terminalId;
+		updateNode(sessionId, { terminalId: undefined });
+		return undefined;
+	};
+
+	/**
+	 * Find this process's own Ghostty pane by briefly showing a unique title.
+	 * The focused pane is not a safe stand-in: Pi can start or resume while another
+	 * tab has focus, and recording that pane makes /branch split someone else's.
+	 * Without a TUI there is no pane to find, so nothing is bound.
+	 */
+	const identifyOwnTerminal = async (ctx: ExtensionContext): Promise<string | undefined> => {
+		if (ctx.mode !== "tui") return undefined;
+		const probeTitle = `π-bind-${ctx.sessionManager.getSessionId()}-${uuidv7().slice(-8)}`;
+		ctx.ui.setTitle(probeTitle);
+		try {
+			return await waitForTerminalByTitle(probeTitle);
+		} finally {
+			lastPaneBarKey = undefined;
+			refreshPanePresentation(ctx);
+		}
+	};
+
+	/** Sessions whose pane this process has already identified, or tried to. */
+	const probedTerminalSessions = new Set<string>();
+
 	const ensureCurrentNode = async (ctx: ExtensionContext): Promise<BranchNode> => {
 		ensureStateDirs();
 		const sessionId = ctx.sessionManager.getSessionId();
 		let node = getNode(sessionId);
-		const shouldRebindTerminal =
-			!node?.terminalId || (node.pid !== process.pid && node.pid > 0 && !processIsAlive(node.pid));
 		if (!node) {
 			node = createRootNode(ctx, pi.getSessionName());
 			putNode(node);
@@ -281,20 +310,26 @@ export default function (pi: ExtensionAPI) {
 				}) ?? node;
 		}
 
-		if (isGhostty() && shouldRebindTerminal) {
-			// A freshly created child may start before its parent finishes recording the
-			// terminal ID returned by Ghostty. Give that write a brief chance to land.
-			if (node.parentSessionId && !node.terminalId) {
-				await sleep(120);
-				node = getNode(sessionId) ?? node;
+		if (isGhostty()) {
+			// Ghostty terminal IDs do not survive an app restart or a closed pane. A
+			// stale cached ID makes every later split fail with "terminal not found",
+			// so drop it here and let the title probe below rebind.
+			if (node.terminalId && !(await terminalExists(node.terminalId).catch(() => false))) {
+				node = updateNode(sessionId, { terminalId: undefined }) ?? node;
 			}
-			if (!node.terminalId) {
-				try {
-					const terminalId = await getFocusedTerminalId();
-					if (terminalId) node = updateNode(sessionId, { terminalId, pid: process.pid }) ?? node;
-				} catch (error) {
-					updateNode(sessionId, { lastError: error instanceof Error ? error.message : String(error) });
+		}
+
+		if (isGhostty() && !probedTerminalSessions.has(sessionId)) {
+			// A recorded ID can name a pane that now hosts another session (a resume in
+			// a new tab, or an earlier focus-based guess), so confirm it once per process.
+			probedTerminalSessions.add(sessionId);
+			try {
+				const terminalId = await identifyOwnTerminal(ctx);
+				if (terminalId && terminalId !== node.terminalId) {
+					node = updateNode(sessionId, { terminalId, pid: process.pid }) ?? node;
 				}
+			} catch (error) {
+				updateNode(sessionId, { lastError: error instanceof Error ? error.message : String(error) });
 			}
 		}
 
@@ -370,7 +405,7 @@ export default function (pi: ExtensionAPI) {
 		);
 
 		try {
-			let sourceTerminalId = getNode(parentNode.sessionId)?.terminalId;
+			let sourceTerminalId = await liveTerminalId(parentNode.sessionId);
 			if (!sourceTerminalId && options.allowFocusedTerminalFallback) {
 				sourceTerminalId = await getFocusedTerminalId();
 				if (sourceTerminalId) updateNode(parentNode.sessionId, { terminalId: sourceTerminalId });
@@ -813,7 +848,7 @@ export default function (pi: ExtensionAPI) {
 		const node = await ensureCurrentNode(ctx);
 		const rootSessionId = node.rootSessionId;
 		const title = sidebarSurfaceTitle(rootSessionId);
-		let sourceTerminalId = getNode(node.sessionId)?.terminalId;
+		let sourceTerminalId = await liveTerminalId(node.sessionId);
 		if (!sourceTerminalId) {
 			sourceTerminalId = await getFocusedTerminalId();
 			if (sourceTerminalId) updateNode(node.sessionId, { terminalId: sourceTerminalId });

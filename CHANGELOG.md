@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Identify each Pi pane by briefly setting a unique title, instead of assuming the focused pane is Pi's own. `/branch` no longer opens next to another session when Pi started or resumed while a different tab had focus.
+- Drop a recorded pane ID once that pane is gone, so splits rebind instead of failing with "terminal not found".
+
 ## 0.2.2
 
 - Stop forwarding Pi's installation-specific `PI_PACKAGE_DIR` into new Ghostty panes.
