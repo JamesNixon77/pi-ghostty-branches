@@ -76,6 +76,57 @@ export async function detectShrinkDirection({ axis, measure, resize, wait, probe
 }
 
 /**
+ * Find a split that shrinks this pane without moving a protected pane, such as
+ * the branch sidebar, whose width only the user should change.
+ *
+ * Ghostty resizes the nearest ancestor split on an axis, which may be the
+ * sidebar's own split. Each probe is checked against the protected pane's
+ * reported size. A probe that moved it is undone and that axis is skipped.
+ *
+ * @param {{
+ *   axes: Array<"columns" | "rows">,
+ *   measure: (axis: "columns" | "rows") => number,
+ *   resize: (direction: string, points: number) => Promise<boolean>,
+ *   wait: (axis: "columns" | "rows", previous: number) => Promise<number>,
+ *   protectedSize?: () => number | undefined,
+ *   waitForProtected?: (previous: number) => Promise<number | undefined>,
+ *   probePoints?: number,
+ * }} options
+ * @returns {Promise<{ axis: "columns" | "rows", direction: string, pointsPerCell: number, expandedSize: number } | undefined>}
+ */
+export async function findShrinkSplit({
+	axes,
+	measure,
+	resize,
+	wait,
+	protectedSize = () => undefined,
+	waitForProtected = async () => protectedSize(),
+	probePoints,
+}) {
+	for (const axis of axes) {
+		const measureAxis = () => measure(axis);
+		const waitAxis = (previous) => wait(axis, previous);
+		const expandedSize = measureAxis();
+		const protectedBefore = protectedSize();
+		const probe = await detectShrinkDirection({ axis, measure: measureAxis, resize, wait: waitAxis, probePoints });
+		if (!probe) continue;
+		if (protectedBefore !== undefined && (await waitForProtected(protectedBefore)) !== protectedBefore) {
+			await convergeSize({
+				target: expandedSize,
+				growDirection: OPPOSITE_DIRECTION[probe.direction],
+				measure: measureAxis,
+				resize,
+				wait: waitAxis,
+				pointsPerCell: probe.pointsPerCell,
+			});
+			continue;
+		}
+		return { axis, ...probe, expandedSize };
+	}
+	return undefined;
+}
+
+/**
  * Move this pane's split until the pane measures `target` cells, refining the
  * points-per-cell estimate from each observed step. Returns the final size.
  *

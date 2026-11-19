@@ -258,7 +258,10 @@ export function sidebarPath(rootSessionId: string): string {
 	return join(SIDEBARS_DIR, `${rootSessionId}.json`);
 }
 
-export function getSidebar(rootSessionId: string): { terminalId: string; pid?: number } | undefined {
+/** `columns` is the sidebar's current width, published by the sidebar process itself. */
+export function getSidebar(
+	rootSessionId: string,
+): { terminalId: string; pid?: number; columns?: number } | undefined {
 	return readJson(sidebarPath(rootSessionId));
 }
 

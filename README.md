@@ -107,13 +107,13 @@ A tree-row click only selects and highlights. It does not transfer keyboard focu
 
 ### Sidebar and advanced layout
 
-Use `- Side` and `+ Side`, or the `-`/`+` keys, to resize the sidebar.
+Use `- Side` and `+ Side`, or the `-`/`+` keys, to resize the sidebar. Its width only changes when you use these controls or drag its divider: Minimize, Expand, `= Equal`, and the `H`/`L`/`K`/`J` controls never give the sidebar other panes' space.
 
 Advanced pane layout controls are hidden by default. Click `l Layout` or press `l` to reveal them:
 
 | Control | Effect |
 | --- | --- |
-| `H Left` / `L Right` | Move a vertical split boundary to change width |
+| `H Left` / `L Right` | Move a vertical split boundary to change width; a move that would resize the sidebar is undone |
 | `K Up` / `J Down` | Move a horizontal split boundary to change height |
 | `= Equal` | Distribute split space equally among Pi panes, keeping the sidebar's width |
 | `z Zoom` | Toggle Ghostty zoom for the selected pane |
@@ -165,7 +165,7 @@ Ghostty cannot detach a live terminal TUI from a split, so only Minimize keeps P
 
 Hide and Close preserve the same Pi session data. Restore/Resume starts a new Pi process using that saved session.
 
-Minimize with `/minimize`, `Ctrl+Shift+M`, or the sidebar's `m Minimize`. Expand by clicking the strip, pressing any key in it, running the same command or shortcut, choosing `m Expand` or Enter in the sidebar, or dragging the divider back. A pane that is the only open pane in its branch group has nowhere to give its space and refuses to minimize. The sidebar marks minimized rows with `min`, and only offers Minimize for panes whose Pi process has loaded this version; run `/reload` in older panes first.
+Minimize with `/minimize`, `Ctrl+Shift+M`, or the sidebar's `m Minimize`. Expand by clicking the strip, pressing any key in it, running the same command or shortcut, choosing `m Expand` or Enter in the sidebar, or dragging the divider back. A pane that is the only open pane in its branch group has nowhere to give its space and refuses to minimize. Minimize never shrinks a pane into the sidebar: when the split nearest the pane on one axis is the sidebar's own, it uses the other axis, and refuses if that is the only option. The sidebar marks minimized rows with `min`, and only offers Minimize for panes whose Pi process has loaded this version; run `/reload` in older panes first.
 
 Press `Ctrl+Shift+H` inside a child or additional-root pane to hide it. The sidebar's `h Hide` control is also clickable. The extension intentionally does not render a pseudo-clickable top X because terminal-drawn top content moves with Ghostty's native scrollback in regular Pi mode.
 

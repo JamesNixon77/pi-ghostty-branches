@@ -110,28 +110,50 @@ function getSidebarTerminalId() {
 	return readJson(sidebarRecord)?.terminalId;
 }
 
-let equalizing = false;
+/**
+ * Publish this pane's width in the sidebar record so Pi panes can tell when a
+ * resize they make moves the sidebar's split. Only after the parent has
+ * recorded the terminal ID, so this write can never drop it; a later parent
+ * write that drops `columns` is repaired on the next render.
+ */
+function publishColumns() {
+	const columns = process.stdout.isTTY ? process.stdout.columns : undefined;
+	if (!columns) return;
+	const record = readJson(sidebarRecord);
+	if (!record?.terminalId || record.columns === columns) return;
+	atomicWriteJson(sidebarRecord, { ...record, columns });
+}
+
+let layoutQueue = Promise.resolve();
 
 /**
- * Ghostty's equalize_splits treats the sidebar as one more pane and gives it an
- * equal share of the tab. Equalize, then move the sidebar's edge back to its
- * previous width so only the Pi panes share the space.
+ * The sidebar's width only changes when the user moves its divider or uses
+ * -/+ Side. Run a layout action on other panes, then move the sidebar's edge
+ * back if the action moved it. Returns whether the width had to be restored.
  *
  * Ghostty's AppleScript API reports no pane sizes and resize_split takes points,
  * not columns, so converge on the old column count by measuring this pane.
  */
-async function equalizeExceptSidebar(targetTerminalId) {
-	if (equalizing) return;
-	equalizing = true;
+function keepSidebarWidth(runAction) {
+	// Serialize so repeated key presses each get checked instead of racing or being dropped.
+	const result = layoutQueue.then(() => keepSidebarWidthNow(runAction));
+	layoutQueue = result.catch(() => undefined);
+	return result;
+}
+
+async function keepSidebarWidthNow(runAction) {
+	if (stopped) return undefined;
 	try {
 		const sidebarTerminalId = getSidebarTerminalId();
-		const target = process.stdout.columns;
-		if (!performAction(targetTerminalId ?? sidebarTerminalId, "equalize_splits")) return;
-		if (!sidebarTerminalId || !process.stdout.isTTY || !target) return;
+		const target = process.stdout.isTTY ? process.stdout.columns : undefined;
+		if (!runAction()) return undefined;
+		if (!sidebarTerminalId || !target) return false;
 
 		const measure = () => process.stdout.columns;
 		const wait = (previous) => waitForSizeChange(measure, previous);
-		await wait(target);
+		// A short wait is enough to see whether the action reached this pane, and
+		// keeps repeated H/L presses responsive when it did not.
+		if ((await waitForSizeChange(measure, target, { timeoutMs: 250 })) === target) return false;
 		// The sidebar is the left child of its split, so moving right widens it.
 		const columns = await convergeSize({
 			target,
@@ -142,13 +164,36 @@ async function equalizeExceptSidebar(targetTerminalId) {
 				Boolean(performAction(sidebarTerminalId, `resize_split:${direction},${amount}`)),
 			shouldStop: () => stopped,
 		});
-		statusMessage =
-			columns === target
-				? "Equalized panes; sidebar width kept"
-				: "Equalized panes; use -/+ Side to adjust the sidebar";
-		scheduleRender();
+		if (columns !== target) statusMessage = "Could not keep the sidebar width; use -/+ Side to adjust it";
+		return true;
 	} finally {
-		equalizing = false;
+		scheduleRender();
+	}
+}
+
+/**
+ * Ghostty's equalize_splits treats the sidebar as one more pane and gives it an
+ * equal share of the tab, so only the Pi panes keep the equalized space.
+ */
+async function equalizeExceptSidebar(targetTerminalId) {
+	const restored = await keepSidebarWidth(() =>
+		performAction(targetTerminalId ?? getSidebarTerminalId(), "equalize_splits"),
+	);
+	if (restored !== undefined && !statusMessage.startsWith("Could not")) {
+		statusMessage = "Equalized panes; sidebar width kept";
+	}
+}
+
+/**
+ * Move the selected pane's nearest split. When that split is the sidebar's own,
+ * the move is undone: the sidebar only resizes when the user resizes it.
+ */
+async function resizeSelectedPane(terminalId, direction) {
+	const restored = await keepSidebarWidth(() =>
+		performAction(terminalId, `resize_split:${direction},120`),
+	);
+	if (restored && !statusMessage.startsWith("Could not")) {
+		statusMessage = `No ${direction} edge to move there without resizing the sidebar`;
 	}
 }
 
@@ -447,6 +492,7 @@ function buildFooter(nodes, selected, width) {
 
 function render() {
 	if (stopped) return;
+	publishColumns();
 	const testWidth = Number(process.env.PI_GHOSTTY_BRANCHES_TEST_COLUMNS);
 	const terminalWidth = Math.max(20, Number.isFinite(testWidth) && testWidth > 0 ? testWidth : process.stdout.columns || 32);
 	// Keep the last terminal column empty. Filling it sets the terminal's pending
@@ -811,13 +857,13 @@ function runAction(action) {
 		case "resize-right":
 		case "resize-up":
 		case "resize-down":
-			if (node) performAction(node.terminalId, `resize_split:${action.slice("resize-".length)},120`);
+			if (node) void resizeSelectedPane(node.terminalId, action.slice("resize-".length));
 			return;
-		case "sidebar-smaller": {
-			const root = readNodes().find((candidate) => candidate.sessionId === rootSessionId);
-			if (root) performAction(root.terminalId, "resize_split:left,120");
+		case "sidebar-smaller":
+			// Move the sidebar's own split. The root pane's nearest split may be a
+			// different one, which would resize Pi panes instead of the sidebar.
+			performAction(getSidebarTerminalId(), "resize_split:left,120");
 			return;
-		}
 		case "sidebar-larger":
 			performAction(getSidebarTerminalId(), "resize_split:right,120");
 			return;

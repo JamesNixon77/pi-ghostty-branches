@@ -3,6 +3,7 @@ import test from "node:test";
 import {
 	convergeSize,
 	detectShrinkDirection,
+	findShrinkSplit,
 	MAX_RESIZE_POINTS,
 	OPPOSITE_DIRECTION,
 } from "../extensions/ghostty-branches/layout.mjs";
@@ -93,4 +94,61 @@ test("convergeSize gives up when the split stops moving", async () => {
 	const size = await convergeSize({ target: 1000, growDirection: "right", ...pane });
 	assert.equal(size, pane.measure());
 	assert.equal(pane.split.calls.length, 1);
+});
+
+/**
+ * A pane at the top of `[sidebar | [pane / below]]`: its nearest split on the
+ * columns axis is the sidebar's own split, and on the rows axis the split with
+ * the pane below.
+ */
+function paneBesideSidebar() {
+	const sidebarSplit = fakeSplit({ side: "right", ratio: 0.15 });
+	const rowSplit = fakeSplit({ side: "left", ratio: 0.5, widthPoints: 900, cellPoints: 18 });
+	const sidebarColumns = () => Math.floor((sidebarSplit.split.ratio * 1600) / 8);
+	const calls = [];
+	return {
+		sidebarSplit,
+		rowSplit,
+		calls,
+		sidebarColumns,
+		options: {
+			axes: ["columns", "rows"],
+			measure: (axis) => (axis === "columns" ? sidebarSplit.measure() : rowSplit.measure()),
+			resize: async (direction, points) => {
+				calls.push(direction);
+				if (direction === "left" || direction === "right") return sidebarSplit.resize(direction, points);
+				// fakeSplit models a left/right split; up shrinks the top child like left.
+				return rowSplit.resize(direction === "up" ? "left" : "right", points);
+			},
+			wait: async (axis) => (axis === "columns" ? sidebarSplit.measure() : rowSplit.measure()),
+			protectedSize: sidebarColumns,
+		},
+	};
+}
+
+test("minimize skips the sidebar's split and restores the sidebar width", async () => {
+	const pane = paneBesideSidebar();
+	const sidebarBefore = pane.sidebarColumns();
+	const probe = await findShrinkSplit(pane.options);
+	assert.equal(probe.axis, "rows");
+	assert.equal(probe.direction, "up");
+	assert.equal(pane.sidebarColumns(), sidebarBefore, "the sidebar keeps its width");
+	await pane.options.resize(probe.direction, MAX_RESIZE_POINTS);
+	assert.equal(pane.sidebarColumns(), sidebarBefore, "collapsing moves only the row split");
+	assert.equal(pane.rowSplit.split.ratio, 0.1);
+});
+
+test("minimize reports nothing to shrink when only the sidebar's split responds", async () => {
+	const pane = paneBesideSidebar();
+	const sidebarBefore = pane.sidebarColumns();
+	const probe = await findShrinkSplit({ ...pane.options, axes: ["columns"] });
+	assert.equal(probe, undefined);
+	assert.equal(pane.sidebarColumns(), sidebarBefore);
+});
+
+test("without a sidebar the nearest split on the first axis is used", async () => {
+	const pane = paneBesideSidebar();
+	const probe = await findShrinkSplit({ ...pane.options, protectedSize: () => undefined });
+	assert.equal(probe.axis, "columns");
+	assert.equal(probe.direction, "right");
 });

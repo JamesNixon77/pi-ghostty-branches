@@ -38,7 +38,7 @@ import {
 } from "./state.ts";
 import {
 	convergeSize,
-	detectShrinkDirection,
+	findShrinkSplit,
 	MAX_RESIZE_POINTS,
 	OPPOSITE_DIRECTION,
 	waitForSizeChange,
@@ -709,27 +709,37 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 			const resize = resizeOwnSplit(terminalId);
-			for (const axis of ["columns", "rows"] as const) {
-				const measure = () => paneSize(axis);
-				const wait = (previous: number) => waitForSizeChange(measure, previous);
-				const expandedSize = measure();
-				const probe = await detectShrinkDirection({ axis, measure, resize, wait });
-				if (!probe) continue;
-				const probedSize = measure();
+			// The sidebar's width is the user's to set. Skip any split whose probe moved it,
+			// or its pane would take the minimized pane's space.
+			const sidebarColumns = () => getSidebar(node.rootSessionId)?.columns;
+			const probe = await findShrinkSplit({
+				axes: ["columns", "rows"],
+				measure: paneSize,
+				resize,
+				wait: (axis: SplitAxis, previous: number) => waitForSizeChange(() => paneSize(axis), previous),
+				protectedSize: sidebarColumns,
+				waitForProtected: (previous: number) =>
+					waitForSizeChange(() => sidebarColumns() ?? previous, previous, { timeoutMs: 400 }),
+			});
+			if (probe) {
+				const probedSize = paneSize(probe.axis);
 				await resize(probe.direction, MAX_RESIZE_POINTS);
-				const collapsedSize = await wait(probedSize);
+				const collapsedSize = await waitForSizeChange(() => paneSize(probe.axis), probedSize);
 				updateNode(node.sessionId, {
 					collapsed: true,
-					collapseAxis: axis,
+					collapseAxis: probe.axis,
 					collapseDirection: probe.direction as SplitDirection,
-					expandedSize,
+					expandedSize: probe.expandedSize,
 					collapsedSize,
 					collapsePointsPerCell: probe.pointsPerCell,
 				});
 				showMinimizedPlaceholder(ctx);
 				return;
 			}
-			ctx.ui.notify("Ghostty did not resize this pane, so it could not be minimized", "warning");
+			ctx.ui.notify(
+				"This pane has no split to shrink into that would leave the sidebar's width alone, so it was not minimized",
+				"warning",
+			);
 		} finally {
 			paneLayoutBusy = false;
 		}

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Keep the sidebar's width fixed unless you resize it yourself. Minimize no longer shrinks a pane into the sidebar's split. It uses the other axis instead, and refuses if no other split exists. The `H`/`L`/`K`/`J` layout controls undo any move that would resize the sidebar, and `- Side` now moves the sidebar's own divider instead of the root pane's nearest one.
 - Add Minimize: `/minimize`, `Ctrl+Shift+M`, and the sidebar's `m Minimize` shrink a pane to a narrow strip with a placeholder while Pi keeps running, and expand it back to its previous size. The sidebar only offers it to panes that have reloaded this version.
 - Warn once from `/branches` on Ghostty 1.3.x, which swallows the first click on a split divider when the split beneath it is unfocused. Ghostty 1.4.0 fixes it.
 - Ignore unrecognized sidebar requests instead of treating them as Close.
