@@ -13,6 +13,7 @@ import {
 } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { dirname, join } from "node:path";
+import { convergeSize, waitForSizeChange } from "./layout.mjs";
 
 function argument(name) {
 	const index = process.argv.indexOf(name);
@@ -109,24 +110,6 @@ function getSidebarTerminalId() {
 	return readJson(sidebarRecord)?.terminalId;
 }
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-/**
- * Wait for Ghostty to apply a split change to this pane, then for the width to
- * settle. Returns the column count, which is unchanged if nothing happened.
- */
-async function waitForColumnChange(previous, timeoutMs = 600) {
-	const deadline = Date.now() + timeoutMs;
-	while (process.stdout.columns === previous && Date.now() < deadline) await sleep(25);
-	let columns = process.stdout.columns;
-	while (Date.now() < deadline) {
-		await sleep(60);
-		if (process.stdout.columns === columns) break;
-		columns = process.stdout.columns;
-	}
-	return process.stdout.columns;
-}
-
 let equalizing = false;
 
 /**
@@ -146,19 +129,19 @@ async function equalizeExceptSidebar(targetTerminalId) {
 		if (!performAction(targetTerminalId ?? sidebarTerminalId, "equalize_splits")) return;
 		if (!sidebarTerminalId || !process.stdout.isTTY || !target) return;
 
-		let columns = await waitForColumnChange(target);
-		// Typical monospace cell width in points; refined from each observed step.
-		let pointsPerColumn = 8;
-		for (let attempt = 0; attempt < 4 && columns !== target && !stopped; attempt++) {
-			const missing = target - columns;
-			const amount = Math.max(1, Math.round(Math.abs(missing) * pointsPerColumn));
-			const direction = missing > 0 ? "right" : "left";
-			if (!performAction(sidebarTerminalId, `resize_split:${direction},${amount}`)) return;
-			const next = await waitForColumnChange(columns);
-			if (next === columns) break;
-			pointsPerColumn = amount / Math.abs(next - columns);
-			columns = next;
-		}
+		const measure = () => process.stdout.columns;
+		const wait = (previous) => waitForSizeChange(measure, previous);
+		await wait(target);
+		// The sidebar is the left child of its split, so moving right widens it.
+		const columns = await convergeSize({
+			target,
+			growDirection: "right",
+			measure,
+			wait,
+			resize: async (direction, amount) =>
+				Boolean(performAction(sidebarTerminalId, `resize_split:${direction},${amount}`)),
+			shouldStop: () => stopped,
+		});
 		statusMessage =
 			columns === target
 				? "Equalized panes; sidebar width kept"
@@ -253,6 +236,20 @@ function statusGlyph(node) {
 	}
 }
 
+/** A live pane shrunk in place by Minimize. Hidden and closed panes have no pane to shrink. */
+function isCollapsed(node) {
+	return Boolean(node?.collapsed) && node.displayStatus !== "closed" && node.displayStatus !== "minimized";
+}
+
+/**
+ * Whether the pane's running Pi process understands Minimize. Extension versions
+ * before it closed a pane on any unrecognized request, so never send one to a
+ * pane that has not reloaded since.
+ */
+function canCollapse(node) {
+	return Boolean(node?.terminalId) && node.pid > 0 && node.collapseCapablePid === node.pid;
+}
+
 function stripAnsi(value) {
 	return value.replace(/\x1b\[[0-9;]*m/g, "");
 }
@@ -300,7 +297,8 @@ function nodeLine(item, selected, width) {
 	const disclosure = hasChildren ? (collapsed.has(node.sessionId) ? "▸ " : "▾ ") : "  ";
 	const access = node.access === "read-only" ? `${color.muted} R${color.reset}` : "";
 	const error = node.lastError ? ` ${color.red}!${color.reset}` : "";
-	const line = `${indentation}${disclosure}${statusGlyph(node)} ${node.label}${access}${error}`;
+	const minimized = isCollapsed(node) ? `${color.muted} min${color.reset}` : "";
+	const line = `${indentation}${disclosure}${statusGlyph(node)} ${node.label}${access}${minimized}${error}`;
 	const fitted = pad(truncate(line, width), width);
 	return selected ? `${color.reverse}${fitted}${color.reset}` : fitted;
 }
@@ -402,6 +400,11 @@ function buildFooter(nodes, selected, width) {
 		]);
 		addButtons([
 			{ label: "↵ Focus", action: "focus", enabled: liveTerminal },
+			{
+				label: isCollapsed(selected) ? "m Expand" : "m Minimize",
+				action: "collapse-toggle",
+				enabled: liveTerminal && canCollapse(selected),
+			},
 			{
 				label: "h Hide",
 				action: "minimize",
@@ -557,6 +560,8 @@ function request(action, targetSessionId = selectedId, extra = {}) {
 	else if (action === "new-root") statusMessage = "New root session requested";
 	else if (action === "cleanup") statusMessage = "Runtime cleanup requested";
 	else if (action === "minimize") statusMessage = `Hiding “${node.label}”`;
+	else if (action === "collapse") statusMessage = `Minimizing “${node.label}”; it keeps running`;
+	else if (action === "expand") statusMessage = `Expanding “${node.label}”`;
 	else statusMessage = `Closing “${node.label}”`;
 	scheduleRender();
 }
@@ -769,6 +774,15 @@ function runAction(action) {
 		case "minimize":
 			minimizeNode(node);
 			return;
+		case "collapse-toggle":
+			// Minimize shrinks the live pane in place, so it needs no confirmation
+			// and the Pi process keeps running. The pane measures and resizes itself.
+			if (inactive) beginConfirmation("resume", node);
+			else if (node && !canCollapse(node)) {
+				statusMessage = `Run /reload in “${node.label}” to enable Minimize`;
+				scheduleRender();
+			} else if (node) request(isCollapsed(node) ? "expand" : "collapse", node.sessionId);
+			return;
 		case "confirm": {
 			const pending = confirmation;
 			confirmation = undefined;
@@ -788,7 +802,10 @@ function runAction(action) {
 			return;
 		case "focus":
 			if (inactive) beginConfirmation("resume", node);
-			else if (node) focusTerminal(node.terminalId);
+			else if (node) {
+				focusTerminal(node.terminalId);
+				if (isCollapsed(node) && canCollapse(node)) request("expand", node.sessionId);
+			}
 			return;
 		case "resize-left":
 		case "resize-right":
@@ -907,6 +924,7 @@ function handleInput(data) {
 	if (keyboard.includes("o")) return runAction("resume");
 	if (keyboard.includes("x")) return runAction("remove");
 	if (keyboard.includes("h")) return runAction("minimize");
+	if (keyboard.includes("m")) return runAction("collapse-toggle");
 	if (keyboard.includes("c")) return runAction("close");
 	if (keyboard.includes("l")) return runAction("toggle-layout");
 	if (keyboard.includes("H")) return runAction("resize-left");

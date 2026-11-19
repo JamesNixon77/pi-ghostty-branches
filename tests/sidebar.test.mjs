@@ -219,3 +219,90 @@ test("p on the root session sends no request", async () => {
 		await rm(stateDir, { recursive: true, force: true });
 	}
 });
+
+function childNode(rootSessionId, sessionId, extra = {}) {
+	const now = new Date().toISOString();
+	return {
+		version: 1,
+		sessionId,
+		sessionFile: "/tmp/child.jsonl",
+		parentSessionId: rootSessionId,
+		rootSessionId,
+		cwd: "/tmp",
+		label: "child",
+		access: "shared-write",
+		status: "working",
+		pid: process.pid,
+		terminalId: "fake-child-terminal",
+		createdAt: now,
+		updatedAt: now,
+		...extra,
+	};
+}
+
+test("m minimizes the selected pane in place without confirmation", async () => {
+	const stateDir = await mkdtemp(join(tmpdir(), "pi-ghostty-branches-"));
+	const rootSessionId = randomUUID();
+	const childSessionId = randomUUID();
+	try {
+		await writeNode(stateDir, rootNode(rootSessionId));
+		await writeNode(stateDir, childNode(rootSessionId, childSessionId, { collapseCapablePid: process.pid }));
+		const output = await runSidebar(stateDir, rootSessionId, [
+			{ data: "\u001b[B", delay: 200 },
+			{ data: "m" },
+		]);
+		const plain = output.replace(/\u001b\][^\u0007]*\u0007/g, "").replace(/\u001b\[[0-9;?]*[A-Za-z]/g, "");
+		assert.match(plain, /\[m Minimize\]/);
+		const requests = await readRequests(stateDir, childSessionId);
+		assert.equal(requests.length, 1);
+		assert.equal(requests[0].action, "collapse");
+	} finally {
+		await rm(stateDir, { recursive: true, force: true });
+	}
+});
+
+test("m expands a minimized pane", async () => {
+	const stateDir = await mkdtemp(join(tmpdir(), "pi-ghostty-branches-"));
+	const rootSessionId = randomUUID();
+	const childSessionId = randomUUID();
+	try {
+		await writeNode(stateDir, rootNode(rootSessionId));
+		await writeNode(
+			stateDir,
+			childNode(rootSessionId, childSessionId, { collapseCapablePid: process.pid, collapsed: true }),
+		);
+		const output = await runSidebar(stateDir, rootSessionId, [
+			{ data: "\u001b[B", delay: 200 },
+			{ data: "m" },
+		]);
+		const plain = output.replace(/\u001b\][^\u0007]*\u0007/g, "").replace(/\u001b\[[0-9;?]*[A-Za-z]/g, "");
+		assert.match(plain, /child min/);
+		assert.match(plain, /\[m Expand\]/);
+		const requests = await readRequests(stateDir, childSessionId);
+		assert.equal(requests.length, 1);
+		assert.equal(requests[0].action, "expand");
+	} finally {
+		await rm(stateDir, { recursive: true, force: true });
+	}
+});
+
+test("m sends nothing to a pane whose Pi process predates Minimize", async () => {
+	const stateDir = await mkdtemp(join(tmpdir(), "pi-ghostty-branches-"));
+	const rootSessionId = randomUUID();
+	const childSessionId = randomUUID();
+	try {
+		await writeNode(stateDir, rootNode(rootSessionId));
+		// An older extension closes a pane on unknown requests, so a stale or absent
+		// capability must never produce a request.
+		await writeNode(stateDir, childNode(rootSessionId, childSessionId, { collapseCapablePid: process.pid + 1 }));
+		const output = await runSidebar(stateDir, rootSessionId, [
+			{ data: "\u001b[B", delay: 200 },
+			{ data: "m" },
+		]);
+		const plain = output.replace(/\u001b\][^\u0007]*\u0007/g, "").replace(/\u001b\[[0-9;?]*[A-Za-z]/g, "");
+		assert.match(plain, /Run \/reload/);
+		await assert.rejects(readRequests(stateDir, childSessionId), { code: "ENOENT" });
+	} finally {
+		await rm(stateDir, { recursive: true, force: true });
+	}
+});

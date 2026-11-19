@@ -5,7 +5,7 @@ A macOS/Ghostty extension for [Pi](https://github.com/earendil-works/pi) that ru
 ## Requirements
 
 - macOS
-- [Ghostty](https://ghostty.org/) 1.3.1 or newer
+- [Ghostty](https://ghostty.org/) 1.3.1 or newer; 1.4.0 or newer is recommended so split dividers drag on the first click (see [Troubleshooting](#a-split-divider-needs-two-clicks-before-it-drags))
 - Pi 0.84 or newer
 - Node.js 22 or newer (normally supplied by Pi)
 
@@ -74,8 +74,10 @@ The ordinary workflow is:
 | `/branch-close` | Confirm closing this branch without sending context to its parent; retain the session for Resume |
 | `/push [instructions]` | Send this child branch's new findings to its immediate parent and keep the branch open |
 | `/fold [instructions]` | Fold this child branch's new findings into its immediate parent and close the branch |
+| `/minimize` | Shrink this pane to a narrow strip while Pi keeps running; run it again, or press any key in the strip, to expand |
 | `Ctrl+Shift+B` | Create a writable child while the current agent continues running |
 | `Ctrl+Shift+S` | Return focus to the branch sidebar |
+| `Ctrl+Shift+M` | Minimize or expand the current pane |
 | `Ctrl+Shift+H` | Hide the current child/additional-root pane |
 
 ## Sidebar controls
@@ -92,7 +94,8 @@ Every clickable action shows its keyboard equivalent.
 | `p Pull` | Ask the selected child to push its new findings to its parent; the child stays open |
 | `f Fold` | Confirm folding a child into its parent; success closes the child pane |
 | `r Rename` | Rename the Pi session, sidebar row, and pane title |
-| `Enter / Focus` | Focus a live selected pane; offer Resume/Restore for an inactive pane |
+| `Enter / Focus` | Focus a live selected pane, expanding it if minimized; offer Resume/Restore for an inactive pane |
+| `m Minimize` / `m Expand` | Shrink the selected live pane to a narrow strip, or restore its size. Pi keeps running |
 | `h Hide` | Hibernate the selected child or additional root session and remove its pane |
 | `c Close` | Close the selected pane while retaining its saved Pi session |
 | `o Resume` | Reopen a closed saved session in a new pane |
@@ -152,14 +155,17 @@ Fold packets are stored durably, so a temporarily unavailable parent can consume
 
 A push sends the same kind of summary but leaves the child running. Run `/push` in the child, or select the child in the sidebar and use `p Pull`, which asks the child to push. Pushing works while the child is mid-turn. It covers finalized entries up to the last point without an unfinished tool call, so the next push or fold picks up the rest. Pushes and folds share one cursor, so each delivery contains only work done since the previous one. The parent receives pushed findings once it is idle.
 
-### Hide versus close
+### Minimize, hide, and close
 
-Ghostty cannot detach a live terminal TUI from a split. Hide is therefore session hibernation, not background execution:
+Ghostty cannot detach a live terminal TUI from a split, so only Minimize keeps Pi running:
 
+- **Minimize** shrinks the pane in place and draws a placeholder with the branch name and whether it is working. Pi keeps running, so an agent mid-turn carries on. Expanding restores the previous size. Ghostty's `resize_split` stops at 10% of the split the pane shares with its neighbour, so a minimized pane is a narrow strip rather than gone.
 - **Hide** stops Pi, removes the pane, and presents the entry as temporarily restorable.
 - **Close** stops Pi, removes the pane, and presents the entry as completed/resumable/removable.
 
-Both preserve the same Pi session data. Restore/Resume starts a new Pi process using that saved session.
+Hide and Close preserve the same Pi session data. Restore/Resume starts a new Pi process using that saved session.
+
+Minimize with `/minimize`, `Ctrl+Shift+M`, or the sidebar's `m Minimize`. Expand by clicking the strip, pressing any key in it, running the same command or shortcut, choosing `m Expand` or Enter in the sidebar, or dragging the divider back. A pane that is the only open pane in its branch group has nowhere to give its space and refuses to minimize. The sidebar marks minimized rows with `min`, and only offers Minimize for panes whose Pi process has loaded this version; run `/reload` in older panes first.
 
 Press `Ctrl+Shift+H` inside a child or additional-root pane to hide it. The sidebar's `h Hide` control is also clickable. The extension intentionally does not render a pseudo-clickable top X because terminal-drawn top content moves with Ghostty's native scrollback in regular Pi mode.
 
@@ -198,6 +204,12 @@ Run cleanup from Pi or the sidebar:
 or click `d Cleanup`. Cleanup removes only reconstructable or orphaned coordination data: metadata whose process, Ghostty terminal, and saved session are all gone; stale sidebar/selection records; orphaned generated launchers; and abandoned temporary/processing files older than one hour. It never deletes Pi session JSONL files. Closed or hidden branches with an existing session file remain available for Resume/Restore.
 
 ## Troubleshooting
+
+### A split divider needs two clicks before it drags
+
+This is a Ghostty 1.3.0/1.3.1 bug. A divider's grab area overlaps the splits on both sides, and those versions treat a click there as a focus-only click whenever the split underneath is unfocused, so the click focuses that split instead of starting a drag. Clicking either half of the divider can therefore flip focus between its neighbours. Ghostty 1.4.0 checks what is actually under the pointer, so the divider takes the first click. Update with Ghostty → Check for Updates…. `/branches` warns once per Pi process when it detects an affected version.
+
+On 1.3.x, `focus-follows-mouse = true` in the Ghostty config also works around it, because the split under the divider is already focused by the time you click. It also sends keystrokes to whichever pane the pointer rests over, including the sidebar, whose single-letter keys act immediately.
 
 ### A child says no API key was found
 

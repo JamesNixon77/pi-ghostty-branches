@@ -1,6 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { inheritedChildEnvironment, waitForTerminalByTitle } from "../extensions/ghostty-branches/ghostty.ts";
+import {
+	dividerSwallowsFirstClick,
+	inheritedChildEnvironment,
+	waitForTerminalByTitle,
+} from "../extensions/ghostty-branches/ghostty.ts";
+
+test("only Ghostty 1.3.x swallows the first click on a split divider", () => {
+	assert.equal(dividerSwallowsFirstClick("1.3.0"), true);
+	assert.equal(dividerSwallowsFirstClick("1.3.1\n"), true);
+	assert.equal(dividerSwallowsFirstClick("1.2.3"), false);
+	assert.equal(dividerSwallowsFirstClick("1.4.0"), false);
+	assert.equal(dividerSwallowsFirstClick("1.13.0"), false);
+	assert.equal(dividerSwallowsFirstClick(undefined), false);
+	assert.equal(dividerSwallowsFirstClick("tip"), false);
+});
 
 test("child environments exclude stale Pi installation and session state", () => {
 	const inherited = inheritedChildEnvironment({

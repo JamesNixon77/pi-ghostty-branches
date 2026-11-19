@@ -9,7 +9,7 @@ import {
 	type ExtensionContext,
 	type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
-import { Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { Text, truncateToWidth, visibleWidth, wrapTextWithAnsi, type TuiMouseEvent } from "@earendil-works/pi-tui";
 import { cleanupState, type CleanupResult } from "./cleanup.ts";
 import {
 	atomicWriteText,
@@ -33,13 +33,23 @@ import {
 	writeFold,
 	type BranchNode,
 	type FoldPacket,
+	type SplitAxis,
 	type SplitDirection,
 } from "./state.ts";
 import {
+	convergeSize,
+	detectShrinkDirection,
+	MAX_RESIZE_POINTS,
+	OPPOSITE_DIRECTION,
+	waitForSizeChange,
+} from "./layout.mjs";
+import {
 	buildLauncher,
+	dividerSwallowsFirstClick,
 	findTerminalByTitle,
 	focusTerminal,
 	getFocusedTerminalId,
+	getGhosttyVersion,
 	getPiInvocation,
 	inheritedChildEnvironment,
 	performTerminalAction,
@@ -165,8 +175,31 @@ function childLabel(goal: string | undefined, sessionId: string): string {
 	return `branch ${sessionId.slice(0, 8)}`;
 }
 
+/** Node fields that describe a minimized pane, cleared once it expands or its pane goes away. */
+const EXPANDED_PANE: Partial<BranchNode> = {
+	collapsed: undefined,
+	collapseAxis: undefined,
+	collapseDirection: undefined,
+	expandedSize: undefined,
+	collapsedSize: undefined,
+	collapsePointsPerCell: undefined,
+};
+
+function paneSize(axis: SplitAxis): number {
+	return (axis === "columns" ? process.stdout.columns : process.stdout.rows) ?? 0;
+}
+
 function sidebarSurfaceTitle(rootSessionId: string): string {
 	return `π branches · ${rootSessionId.slice(0, 8)}`;
+}
+
+/** The full-pane overlay shown over a minimized pane until it expands. */
+interface MinimizedPlaceholder {
+	dismissed: boolean;
+	expanding: boolean;
+	done?: () => void;
+	tui?: { requestRender(): void; terminal: { rows: number } };
+	onResize?: () => void;
 }
 
 function createRootNode(ctx: ExtensionContext, name: string | undefined): BranchNode {
@@ -199,6 +232,9 @@ export default function (pi: ExtensionAPI) {
 	let paneBarTui: { requestRender(): void } | undefined;
 	let paneBarInstalled = false;
 	let lastPaneBarKey: string | undefined;
+	let paneLayoutBusy = false;
+	let placeholder: MinimizedPlaceholder | undefined;
+	let ghosttyVersionChecked = false;
 
 	const rememberContext = (ctx: ExtensionContext): void => {
 		activeContext = ctx;
@@ -296,7 +332,7 @@ export default function (pi: ExtensionAPI) {
 		const sessionId = ctx.sessionManager.getSessionId();
 		let node = getNode(sessionId);
 		if (!node) {
-			node = createRootNode(ctx, pi.getSessionName());
+			node = { ...createRootNode(ctx, pi.getSessionName()), collapseCapablePid: process.pid };
 			putNode(node);
 		} else {
 			node =
@@ -305,6 +341,7 @@ export default function (pi: ExtensionAPI) {
 					cwd: ctx.cwd,
 					label: node.parentSessionId ? node.label : pi.getSessionName() || node.label,
 					pid: process.pid,
+					collapseCapablePid: process.pid,
 					status: ctx.isIdle() ? "idle" : "working",
 					lastError: undefined,
 				}) ?? node;
@@ -315,7 +352,7 @@ export default function (pi: ExtensionAPI) {
 			// stale cached ID makes every later split fail with "terminal not found",
 			// so drop it here and let the title probe below rebind.
 			if (node.terminalId && !(await terminalExists(node.terminalId).catch(() => false))) {
-				node = updateNode(sessionId, { terminalId: undefined }) ?? node;
+				node = updateNode(sessionId, { terminalId: undefined, ...EXPANDED_PANE }) ?? node;
 			}
 		}
 
@@ -326,7 +363,8 @@ export default function (pi: ExtensionAPI) {
 			try {
 				const terminalId = await identifyOwnTerminal(ctx);
 				if (terminalId && terminalId !== node.terminalId) {
-					node = updateNode(sessionId, { terminalId, pid: process.pid }) ?? node;
+					// A different pane was never minimized, whatever the record says.
+					node = updateNode(sessionId, { terminalId, pid: process.pid, ...EXPANDED_PANE }) ?? node;
 				}
 			} catch (error) {
 				updateNode(sessionId, { lastError: error instanceof Error ? error.message : String(error) });
@@ -536,6 +574,219 @@ export default function (pi: ExtensionAPI) {
 		return true;
 	};
 
+	const otherOpenPanes = (node: BranchNode): BranchNode[] =>
+		listNodes(node.rootSessionId).filter(
+			(candidate) =>
+				candidate.sessionId !== node.sessionId &&
+				Boolean(candidate.terminalId) &&
+				candidate.status !== "closed" &&
+				candidate.status !== "minimized" &&
+				candidate.pid > 0 &&
+				processIsAlive(candidate.pid),
+		);
+
+	const resizeOwnSplit =
+		(terminalId: string) =>
+		(direction: string, points: number): Promise<boolean> =>
+			performTerminalAction(terminalId, `resize_split:${direction},${points}`).catch(() => false);
+
+	const renderMinimizedPlaceholder = (state: MinimizedPlaceholder, width: number): string[] => {
+		const ctx = activeContext;
+		if (!ctx || width <= 0) return [];
+		const theme = ctx.ui.theme;
+		const label = paneBarPresentation?.node.label ?? pi.getSessionName() ?? "branch";
+		const status = state.expanding
+			? theme.fg("muted", "Expanding…")
+			: ctx.isIdle()
+				? theme.fg("success", "● idle")
+				: theme.fg("warning", "● working");
+		const lines = [
+			theme.fg("accent", theme.bold("▸ Minimized")),
+			status,
+			"",
+			...wrapTextWithAnsi(theme.bold(label), width).slice(0, 6),
+			"",
+			...wrapTextWithAnsi(theme.fg("dim", "Click or press any key to expand"), width),
+		];
+		// Cover every row so the narrow transcript underneath does not show through.
+		const rows = Math.max(1, state.tui?.terminal.rows ?? lines.length);
+		while (lines.length < rows) lines.push("");
+		return lines.slice(0, rows).map((line) => {
+			const fitted = truncateToWidth(line, width, "");
+			return fitted + " ".repeat(Math.max(0, width - visibleWidth(fitted)));
+		});
+	};
+
+	const dismissMinimizedPlaceholder = (): void => {
+		const current = placeholder;
+		placeholder = undefined;
+		if (!current) return;
+		current.dismissed = true;
+		if (current.onResize) process.stdout.off("resize", current.onResize);
+		current.done?.();
+	};
+
+	const showMinimizedPlaceholder = (ctx: ExtensionContext): void => {
+		if (placeholder || ctx.mode !== "tui") return;
+		const state: MinimizedPlaceholder = { dismissed: false, expanding: false };
+		placeholder = state;
+		const sessionId = ctx.sessionManager.getSessionId();
+
+		// Dragging the divider or equalizing splits also expands the pane. Treat a
+		// clear jump past the minimized size as the user expanding it by hand.
+		state.onResize = () => {
+			if (paneLayoutBusy || state.dismissed) return;
+			const node = getNode(sessionId);
+			if (!node?.collapsed || !node.collapseAxis) {
+				dismissMinimizedPlaceholder();
+				return;
+			}
+			const collapsedSize = node.collapsedSize ?? 0;
+			const margin = Math.max(3, Math.round(((node.expandedSize ?? collapsedSize) - collapsedSize) / 3));
+			if (paneSize(node.collapseAxis) >= collapsedSize + margin) {
+				updateNode(sessionId, EXPANDED_PANE);
+				dismissMinimizedPlaceholder();
+			}
+		};
+		process.stdout.on("resize", state.onResize);
+
+		const expand = (): void => {
+			const current = activeContext ?? ctx;
+			void expandPane(current);
+		};
+		void ctx.ui
+			.custom<void>(
+				(tui, _theme, _keybindings, done) => {
+					state.tui = tui;
+					state.done = () => done(undefined);
+					if (state.dismissed) queueMicrotask(() => done(undefined));
+					return {
+						render: (width: number) => renderMinimizedPlaceholder(state, width),
+						handleInput: () => expand(),
+						handleMouse: (event: TuiMouseEvent) => {
+							if (event.type === "click" && event.button === "left") expand();
+							return { handled: true };
+						},
+						invalidate() {},
+					};
+				},
+				{
+					overlay: true,
+					overlayOptions: { anchor: "top-left", width: "100%", maxHeight: "100%", margin: 0 },
+				},
+			)
+			.catch(() => undefined)
+			.finally(() => {
+				if (placeholder === state) dismissMinimizedPlaceholder();
+			});
+	};
+
+	/**
+	 * Minimize shrinks this live pane in place instead of stopping Pi, so a running
+	 * agent keeps working. Ghostty cannot detach a split, and resize_split stops at
+	 * 10% of the parent split, so the pane stays as a narrow strip under a placeholder.
+	 */
+	const collapsePane = async (ctx: ExtensionContext): Promise<void> => {
+		if (ctx.mode !== "tui" || !isGhostty()) {
+			ctx.ui.notify("Minimize needs a Pi pane running inside Ghostty", "warning");
+			return;
+		}
+		if (paneLayoutBusy) return;
+		paneLayoutBusy = true;
+		try {
+			const node = await ensureCurrentNode(ctx);
+			if (node.collapsed) {
+				showMinimizedPlaceholder(ctx);
+				return;
+			}
+			if (otherOpenPanes(node).length === 0) {
+				ctx.ui.notify("Nothing to minimize into: this is the only open pane in its branch group", "warning");
+				return;
+			}
+			const terminalId = await liveTerminalId(node.sessionId);
+			if (!terminalId) {
+				ctx.ui.notify("Could not identify this pane in Ghostty", "error");
+				return;
+			}
+			const resize = resizeOwnSplit(terminalId);
+			for (const axis of ["columns", "rows"] as const) {
+				const measure = () => paneSize(axis);
+				const wait = (previous: number) => waitForSizeChange(measure, previous);
+				const expandedSize = measure();
+				const probe = await detectShrinkDirection({ axis, measure, resize, wait });
+				if (!probe) continue;
+				const probedSize = measure();
+				await resize(probe.direction, MAX_RESIZE_POINTS);
+				const collapsedSize = await wait(probedSize);
+				updateNode(node.sessionId, {
+					collapsed: true,
+					collapseAxis: axis,
+					collapseDirection: probe.direction as SplitDirection,
+					expandedSize,
+					collapsedSize,
+					collapsePointsPerCell: probe.pointsPerCell,
+				});
+				showMinimizedPlaceholder(ctx);
+				return;
+			}
+			ctx.ui.notify("Ghostty did not resize this pane, so it could not be minimized", "warning");
+		} finally {
+			paneLayoutBusy = false;
+		}
+	};
+
+	const expandPane = async (ctx: ExtensionContext): Promise<void> => {
+		const sessionId = ctx.sessionManager.getSessionId();
+		const node = getNode(sessionId);
+		if (!node?.collapsed) {
+			dismissMinimizedPlaceholder();
+			return;
+		}
+		if (paneLayoutBusy) return;
+		paneLayoutBusy = true;
+		if (placeholder) {
+			placeholder.expanding = true;
+			placeholder.tui?.requestRender();
+		}
+		try {
+			const terminalId = await liveTerminalId(sessionId);
+			const { collapseAxis: axis, collapseDirection, expandedSize } = node;
+			if (terminalId && axis && collapseDirection && expandedSize) {
+				const measure = () => paneSize(axis);
+				await convergeSize({
+					target: expandedSize,
+					growDirection: OPPOSITE_DIRECTION[collapseDirection],
+					measure,
+					resize: resizeOwnSplit(terminalId),
+					wait: (previous: number) => waitForSizeChange(measure, previous),
+					pointsPerCell: node.collapsePointsPerCell,
+				});
+			}
+		} finally {
+			updateNode(sessionId, EXPANDED_PANE);
+			paneLayoutBusy = false;
+			dismissMinimizedPlaceholder();
+		}
+	};
+
+	const togglePaneMinimized = async (ctx: ExtensionContext): Promise<void> => {
+		rememberContext(ctx);
+		if (getNode(ctx.sessionManager.getSessionId())?.collapsed) await expandPane(ctx);
+		else await collapsePane(ctx);
+	};
+
+	const warnAboutDividerClicks = async (ctx: ExtensionContext): Promise<void> => {
+		if (ghosttyVersionChecked) return;
+		ghosttyVersionChecked = true;
+		const version = await getGhosttyVersion().catch(() => undefined);
+		if (!dividerSwallowsFirstClick(version)) return;
+		ctx.ui.notify(
+			`Ghostty ${version} swallows the first click on a split divider when the pane under it is unfocused. ` +
+				"Update to Ghostty 1.4 or later (Ghostty → Check for Updates…) to drag dividers on the first click.",
+			"warning",
+		);
+	};
+
 	const resumeBranch = async (ctx: ExtensionContext, branchSessionId: string | undefined): Promise<void> => {
 		if (!branchSessionId) return;
 		const node = getNode(branchSessionId);
@@ -573,6 +824,7 @@ export default function (pi: ExtensionAPI) {
 				terminalId,
 				status: "idle",
 				minimized: false,
+				...EXPANDED_PANE,
 				lastError: undefined,
 			});
 			ctx.ui.notify(`Resumed “${node.label}” in a new Ghostty pane`, "info");
@@ -825,10 +1077,16 @@ export default function (pi: ExtensionAPI) {
 					} else if (request.action === "cleanup") {
 						await cleanupRuntimeState(ctx, false);
 					} else if (request.action === "minimize") {
+						// "minimize" is the original name of Hide, kept for older sidebars.
 						hideCurrentPane(ctx);
-					} else {
+					} else if (request.action === "collapse") {
+						await collapsePane(ctx);
+					} else if (request.action === "expand") {
+						await expandPane(ctx);
+					} else if (request.action === "close") {
 						closeCurrentPane(ctx, true);
 					}
+					// Ignore actions from newer sidebars rather than guessing; closing is irreversible.
 				} finally {
 					removePath(claimed);
 				}
@@ -868,6 +1126,7 @@ export default function (pi: ExtensionAPI) {
 			ctx.ui.notify("The branch sidebar currently requires Ghostty on macOS", "error");
 			return;
 		}
+		void warnAboutDividerClicks(ctx);
 		const node = await ensureCurrentNode(ctx);
 		const rootSessionId = node.rootSessionId;
 		const title = sidebarSurfaceTitle(rootSessionId);
@@ -1056,10 +1315,22 @@ export default function (pi: ExtensionAPI) {
 		handler: (ctx) => hideCurrentPane(ctx),
 	});
 
+	pi.registerCommand("minimize", {
+		description: "Shrink this pane to a narrow strip while Pi keeps running; run again or press any key to expand",
+		handler: async (_args, ctx) => togglePaneMinimized(ctx),
+	});
+
+	pi.registerShortcut("ctrl+shift+m", {
+		description: "Minimize or expand the current Ghostty branch pane",
+		handler: async (ctx) => togglePaneMinimized(ctx),
+	});
+
 	pi.on("session_start", async (_event, ctx) => {
 		rememberContext(ctx);
-		await ensureCurrentNode(ctx);
+		const node = await ensureCurrentNode(ctx);
 		refreshPanePresentation(ctx);
+		// A /reload keeps the shrunken pane but loses the placeholder drawn over it.
+		if (node.collapsed) showMinimizedPlaceholder(ctx);
 		if (scanTimer) clearInterval(scanTimer);
 		scanTimer = setInterval(() => void tick(), SCAN_INTERVAL_MS);
 		scanTimer.unref?.();
@@ -1081,16 +1352,19 @@ export default function (pi: ExtensionAPI) {
 	pi.on("agent_start", (_event, ctx) => {
 		rememberContext(ctx);
 		updateNode(ctx.sessionManager.getSessionId(), { status: "working", pid: process.pid });
+		placeholder?.tui?.requestRender();
 	});
 
 	pi.on("agent_settled", async (_event, ctx) => {
 		rememberContext(ctx);
 		updateNode(ctx.sessionManager.getSessionId(), { status: "idle", pid: process.pid });
+		placeholder?.tui?.requestRender();
 		await tick();
 	});
 
 	pi.on("session_shutdown", (event, ctx) => {
 		if (scanTimer) clearInterval(scanTimer);
+		dismissMinimizedPlaceholder();
 		ctx.ui.setWidget("ghostty-branches-pane", undefined, { placement: "belowEditor" });
 		paneBarTui = undefined;
 		paneBarPresentation = undefined;
@@ -1102,6 +1376,8 @@ export default function (pi: ExtensionAPI) {
 		updateNode(ctx.sessionManager.getSessionId(), {
 			status: event.reason === "reload" ? "idle" : shutdownDisposition ?? "closed",
 			pid: process.pid,
+			// Outside a reload, this session is leaving its pane, so nothing stays minimized.
+			...(event.reason === "reload" ? {} : EXPANDED_PANE),
 		});
 		shutdownDisposition = undefined;
 	});

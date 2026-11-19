@@ -13,7 +13,9 @@ import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 
 export type SplitDirection = "right" | "left" | "down" | "up";
+/** `minimized` is the hidden (hibernated) state. Panes shrunk in place by Minimize keep their status and set `collapsed`. */
 export type BranchStatus = "idle" | "working" | "folding" | "minimized" | "closed" | "error";
+export type SplitAxis = "columns" | "rows";
 
 export interface BranchNode {
 	version: 1;
@@ -27,6 +29,23 @@ export interface BranchNode {
 	terminalId?: string;
 	splitDirection?: SplitDirection;
 	minimized?: boolean;
+	/** The live pane is shrunk in place to its split's minimum; its Pi process keeps running. */
+	collapsed?: boolean;
+	collapseAxis?: SplitAxis;
+	/** The `resize_split` direction that shrank the pane. Expanding moves the opposite way. */
+	collapseDirection?: SplitDirection;
+	/** Pane size in cells along `collapseAxis` before it was minimized. */
+	expandedSize?: number;
+	/** Pane size in cells along `collapseAxis` once minimized. */
+	collapsedSize?: number;
+	/** Points per cell observed while minimizing, used to restore the size in few steps. */
+	collapsePointsPerCell?: number;
+	/**
+	 * PID of the Pi process that can minimize this pane in place. The sidebar only
+	 * offers Minimize when this matches `pid`, because extension versions before
+	 * Minimize treated any unknown request as Close.
+	 */
+	collapseCapablePid?: number;
 	cwd: string;
 	label: string;
 	goal?: string;
@@ -42,7 +61,18 @@ export interface BranchNode {
 export interface BranchRequest {
 	version: 1;
 	id: string;
-	action: "branch" | "fold" | "push" | "rename" | "close" | "minimize" | "resume" | "new-root" | "cleanup";
+	action:
+		| "branch"
+		| "fold"
+		| "push"
+		| "rename"
+		| "close"
+		| "minimize"
+		| "collapse"
+		| "expand"
+		| "resume"
+		| "new-root"
+		| "cleanup";
 	targetSessionId: string;
 	branchSessionId?: string;
 	groupRootSessionId?: string;

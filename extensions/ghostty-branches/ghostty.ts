@@ -82,6 +82,22 @@ export function isGhostty(): boolean {
 	);
 }
 
+export async function getGhosttyVersion(): Promise<string | undefined> {
+	return (await runAppleScript(`tell application "Ghostty" to return version`)) || undefined;
+}
+
+/**
+ * Ghostty 1.3.0 and 1.3.1 hit-test each split against itself rather than the
+ * window when deciding whether a click only transfers focus. The divider's grab
+ * area overlaps both neighbouring splits, so a click on it is swallowed as a
+ * focus click whenever the split beneath is unfocused, and the first grab never
+ * starts a drag. Ghostty 1.4.0 hit-tests the window, so the divider gets the click.
+ */
+export function dividerSwallowsFirstClick(version: string | undefined): boolean {
+	const match = /^(\d+)\.(\d+)\./.exec(version?.trim() ?? "");
+	return match !== null && Number(match[1]) === 1 && Number(match[2]) === 3;
+}
+
 export async function getFocusedTerminalId(): Promise<string | undefined> {
 	const script = `tell application "Ghostty"
   if (count of windows) is 0 then return ""

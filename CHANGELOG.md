@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add Minimize: `/minimize`, `Ctrl+Shift+M`, and the sidebar's `m Minimize` shrink a pane to a narrow strip with a placeholder while Pi keeps running, and expand it back to its previous size. The sidebar only offers it to panes that have reloaded this version.
+- Warn once from `/branches` on Ghostty 1.3.x, which swallows the first click on a split divider when the split beneath it is unfocused. Ghostty 1.4.0 fixes it.
+- Ignore unrecognized sidebar requests instead of treating them as Close.
 - Add `/push [instructions]` and the sidebar `p Pull` action, which send a child's new findings to its parent without closing the child. Pushes can run mid-turn and share the fold cursor, so each delivery covers only new work.
 - Identify each Pi pane by briefly setting a unique title, instead of assuming the focused pane is Pi's own. `/branch` no longer opens next to another session when Pi started or resumed while a different tab had focus.
 - Drop a recorded pane ID once that pane is gone, so splits rebind instead of failing with "terminal not found".
